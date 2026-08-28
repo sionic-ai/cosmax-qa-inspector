@@ -10,6 +10,7 @@ let running = false;
 let speed = 4;
 let uploadedImages = [];
 let useDemo = true;
+let selectedModel = "moonshotai/kimi-k3-ultrafast";
 
 let total = 0, okCount = 0, badCount = 0, errCount = 0;
 let latencies = [];
@@ -89,6 +90,12 @@ function fileToDataUrl(file) {
 $("demoBtn").addEventListener("click", () => {
   useDemo = true; uploadedImages = [];
   flash("데모 이미지 모드");
+});
+
+
+$("modelSelect").addEventListener("change", (e) => {
+  selectedModel = e.target.value;
+  $("modelLabel").textContent = selectedModel;
 });
 
 // ── Speed ──────────────────────────────────────────────────────
@@ -191,7 +198,7 @@ async function inspectImage(id, dataUrl, card) {
     const res = await fetch(API, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ image: dataUrl }),
+      body: JSON.stringify({ image: dataUrl, model: selectedModel }),
     });
     const data = await res.json();
     const latency = Math.round(performance.now() - t0);

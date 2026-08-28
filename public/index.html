@@ -108,6 +108,19 @@ main{flex:1;display:grid;grid-template-columns:1fr 380px;gap:0;overflow:hidden}
 .spotlight .sl-badge.bad{background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
 .spotlight .sl-badge.wait{background:rgba(79,140,255,.1);color:#93c5fd;border:1px solid rgba(79,140,255,.2)}
 
+
+/* Model selector */
+.model-select-wrap{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim)}
+.model-select{
+  font-family:inherit;font-size:12px;font-weight:600;
+  padding:7px 12px;border-radius:8px;border:1px solid var(--border);
+  background:var(--panel2);color:var(--txt);cursor:pointer;outline:none;
+  transition:.15s;
+}
+.model-select:hover{border-color:var(--accent)}
+.model-select:focus{border-color:var(--accent)}
+.model-select option{background:var(--panel2);color:var(--txt)}
+
 /* Grid */
 .grid-scroll{flex:1;overflow-y:auto;padding:8px 22px 22px}
 .grid{
@@ -210,7 +223,7 @@ main{flex:1;display:grid;grid-template-columns:1fr 380px;gap:0;overflow:hidden}
 <header>
   <div class="logo">C</div>
   <h1>COSMAX Cosmetic QA Inspector
-    <small>moonshotai/kimi-k3-ultrafast · OpenGateway Vision</small>
+    <small><span id="modelLabel">moonshotai/kimi-k3-ultrafast</span> · OpenGateway Vision</small>
   </h1>
   <div class="right">
     <div class="pill" id="statusPill"><span class="dot" style="background:var(--dim)"></span> 대기</div>
@@ -226,6 +239,15 @@ main{flex:1;display:grid;grid-template-columns:1fr 380px;gap:0;overflow:hidden}
         <span class="label">실측 TPS</span>
         <span class="val" id="tpsVal">0.0</span>
         <span class="unit">img/s</span>
+      </div>
+      
+      <div class="model-select-wrap">
+        모델
+        <select class="model-select" id="modelSelect">
+          <option value="moonshotai/kimi-k3-ultrafast">Kimi K3 Ultrafast</option>
+          <option value="z-ai/glm-5.3-flash">GLM 5.3 Flash</option>
+          <option value="sionic-ai/glm-5.3-flash-ultrafast">GLM 5.3 Flash Ultrafast</option>
+        </select>
       </div>
       <div class="speed-control">
         속도

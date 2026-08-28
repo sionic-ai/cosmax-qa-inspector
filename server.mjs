@@ -7,7 +7,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = 5173;
 const API_URL = "https://apis.opengateway.ai/v1/chat/completions";
 const API_KEY = process.env.OPENGATEWAY_API_KEY || "";
-const MODEL = "moonshotai/kimi-k3-ultrafast";
+const DEFAULT_MODEL = "moonshotai/kimi-k3-ultrafast";
 
 const MIME = {
   ".html": "text/html",
@@ -22,7 +22,6 @@ const MIME = {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
-  // CORS + preflight
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
@@ -32,16 +31,17 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === "/api/inspect" && req.method === "POST") {
     let body = "";
     for await (const chunk of req) body += chunk;
-    let { image } = {};
-    try { ({ image } = JSON.parse(body)); } catch {
+    let parsed = {};
+    try { parsed = JSON.parse(body); } catch {
       res.writeHead(400).end(JSON.stringify({ error: "Invalid JSON" })); return;
     }
+    const { image, model } = parsed;
     if (!image) {
       res.writeHead(400).end(JSON.stringify({ error: "Missing image field" })); return;
     }
 
     const payload = {
-      model: MODEL,
+      model: model || DEFAULT_MODEL,
       messages: [{
         role: "user",
         content: [
@@ -81,12 +81,13 @@ Respond ONLY with a compact JSON object — no markdown, no explanation:
 
       let raw = data.choices?.[0]?.message?.content ?? "";
       raw = raw.replace(/```json/gi, "").replace(/```/g, "").trim();
-      let parsed = {};
-      try { parsed = JSON.parse(raw); } catch { parsed = { raw }; }
+      let result = {};
+      try { result = JSON.parse(raw); } catch { result = { raw }; }
 
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({
-        ...parsed,
+        ...result,
+        model: model || DEFAULT_MODEL,
         latency_ms: latency,
         usage: data.usage,
       }));
