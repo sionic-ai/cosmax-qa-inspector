@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>COSMAX · Cosmetic Line QA Inspector</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0e1a; --panel:#121826; --panel2:#1a2236; --border:#232c43;
+  --txt:#e6ecf5; --dim:#7b89a8; --accent:#4f8cff; --accent2:#6ee7f0;
+  --ok:#22c55e; --bad:#ef4444; --warn:#f59e0b;
+  --r:14px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  font-family:'Inter',system-ui,sans-serif;
+  background:var(--bg);color:var(--txt);
+  display:flex;flex-direction:column;
+  overflow:hidden;
+}
+
+/* ── Header ─────────────────────────────── */
+header{
+  display:flex;align-items:center;gap:14px;
+  padding:14px 24px;
+  background:linear-gradient(90deg,rgba(79,140,255,.08),transparent);
+  border-bottom:1px solid var(--border);
+  flex-shrink:0;
+}
+.logo{
+  width:38px;height:38px;border-radius:10px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  display:flex;align-items:center;justify-content:center;
+  font-weight:800;color:#0a0e1a;font-size:18px;
+  box-shadow:0 0 24px rgba(79,140,255,.35);
+}
+header h1{font-size:17px;font-weight:700;letter-spacing:-.02em}
+header h1 small{display:block;font-size:11px;color:var(--dim);font-weight:400;letter-spacing:0;margin-top:1px}
+header .right{margin-left:auto;display:flex;gap:8px;align-items:center}
+.pill{
+  font-size:11px;font-weight:600;padding:5px 11px;border-radius:20px;
+  background:var(--panel2);border:1px solid var(--border);color:var(--dim);
+  display:flex;align-items:center;gap:6px;
+}
+.pill .dot{width:7px;height:7px;border-radius:50%}
+.pill.live .dot{background:var(--ok);animation:pulse 1.5s infinite}
+.pill.live{color:var(--ok);border-color:rgba(34,197,94,.3)}
+.pill.err .dot{background:var(--bad);animation:pulse 1s infinite}
+.pill.err{color:var(--bad);border-color:rgba(239,68,68,.3)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* ── Layout ─────────────────────────────── */
+main{flex:1;display:grid;grid-template-columns:1fr 380px;gap:0;overflow:hidden}
+
+/* Left: feed */
+.feed{display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border)}
+.feed-head{padding:14px 22px 10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.feed-head h2{font-size:14px;font-weight:600}
+.feed-head .spacer{flex:1}
+
+.tps-card{
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--r);
+  padding:10px 16px;display:flex;align-items:baseline;gap:6px;
+}
+.tps-card .label{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
+.tps-card .val{font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;color:var(--accent2);min-width:54px}
+.tps-card .unit{font-size:12px;color:var(--dim)}
+
+.controls{display:flex;gap:8px;align-items:center}
+.btn{
+  font-family:inherit;font-size:13px;font-weight:600;
+  padding:8px 18px;border-radius:10px;border:1px solid var(--border);
+  background:var(--panel2);color:var(--txt);cursor:pointer;
+  transition:.15s;
+}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn.primary{background:linear-gradient(135deg,var(--accent),#3b6fd4);border-color:transparent;color:#fff}
+.btn.primary:hover{filter:brightness(1.1)}
+.btn.danger{background:linear-gradient(135deg,#ef4444,#dc2626);border-color:transparent;color:#fff}
+
+.speed-control{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim)}
+.speed-control input{width:80px;accent-color:var(--accent)}
+
+/* Spotlight — latest result */
+.spotlight{
+  display:flex;align-items:center;gap:14px;
+  padding:10px 22px;
+  background:var(--panel);
+  border-bottom:1px solid var(--border);
+  min-height:64px;
+}
+.spotlight .sl-img{
+  width:48px;height:48px;border-radius:8px;object-fit:cover;
+  border:2px solid var(--border);
+}
+.spotlight .sl-img.ok{border-color:var(--ok)}
+.spotlight .sl-img.bad{border-color:var(--bad)}
+.spotlight .sl-text{flex:1}
+.spotlight .sl-text .sl-title{font-size:13px;font-weight:600}
+.spotlight .sl-text .sl-sub{font-size:11px;color:var(--dim);font-family:'JetBrains Mono',monospace;margin-top:2px}
+.spotlight .sl-badge{
+  font-size:12px;font-weight:700;padding:6px 14px;border-radius:8px;
+}
+.spotlight .sl-badge.ok{background:rgba(34,197,94,.15);color:#4ade80;border:1px solid rgba(34,197,94,.3)}
+.spotlight .sl-badge.bad{background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
+.spotlight .sl-badge.wait{background:rgba(79,140,255,.1);color:#93c5fd;border:1px solid rgba(79,140,255,.2)}
+
+/* Grid */
+.grid-scroll{flex:1;overflow-y:auto;padding:8px 22px 22px}
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
+  gap:12px;
+}
+.card{
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--r);
+  overflow:hidden;position:relative;
+  transition:.2s;
+  animation:cardIn .3s ease;
+}
+@keyframes cardIn{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
+.card.defect{border-color:var(--bad);box-shadow:0 0 20px rgba(239,68,68,.15)}
+.card.ok{border-color:rgba(34,197,94,.3)}
+.card.pending .overlay{background:rgba(79,140,255,.12)}
+
+.card .img-wrap{aspect-ratio:1;background:#0d1117;position:relative;overflow:hidden}
+.card img{width:100%;height:100%;object-fit:cover;display:block}
+.card .img-wrap::after{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(to top,rgba(10,14,26,.6),transparent 40%);
+}
+.card .overlay{
+  position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;
+  padding:8px 10px;
+}
+.badge{
+  align-self:flex-start;font-size:10px;font-weight:700;padding:3px 8px;border-radius:6px;
+  text-transform:uppercase;letter-spacing:.05em;
+  backdrop-filter:blur(6px);
+}
+.badge.ok{background:rgba(34,197,94,.2);color:#4ade80;border:1px solid rgba(34,197,94,.4)}
+.badge.bad{background:rgba(239,68,68,.2);color:#fca5a5;border:1px solid rgba(239,68,68,.4)}
+.badge.wait{background:rgba(79,140,255,.15);color:#93c5fd;border:1px solid rgba(79,140,255,.3)}
+.badge.err{background:rgba(245,158,11,.2);color:#fcd34d;border:1px solid rgba(245,158,11,.4)}
+
+.card .info{padding:8px 10px 10px;font-size:11px}
+.card .info .type{font-weight:600;color:var(--txt);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .info .meta{display:flex;justify-content:space-between;color:var(--dim);font-family:'JetBrains Mono',monospace;font-size:10px}
+.card .info .conf{color:var(--accent2)}
+
+.scanline{
+  position:absolute;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--accent2),transparent);
+  animation:scan .8s linear infinite;
+  pointer-events:none;
+}
+@keyframes scan{0%{top:0}100%{top:100%}}
+
+/* ── Right panel: stats ─────────────────── */
+.stats{display:flex;flex-direction:column;overflow-y:auto;background:var(--panel)}
+.stats-section{padding:18px 22px;border-bottom:1px solid var(--border)}
+.stats-section h3{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin-bottom:12px;font-weight:600}
+
+.big-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat-box{
+  background:var(--panel2);border:1px solid var(--border);border-radius:10px;
+  padding:12px 14px;
+}
+.stat-box .num{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700}
+.stat-box .lbl{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
+.stat-box.ok .num{color:var(--ok)}
+.stat-box.bad .num{color:var(--bad)}
+.stat-box.rate .num{color:var(--accent2)}
+
+.defect-rate-bar{
+  margin-top:12px;background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px;
+}
+.defect-rate-bar .drl-label{display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px}
+.defect-rate-bar .drl-label .ok{color:var(--ok)}
+.defect-rate-bar .drl-label .bad{color:var(--bad)}
+.bar-track{height:8px;border-radius:4px;background:var(--border);overflow:hidden;display:flex}
+.bar-fill-ok{background:var(--ok);transition:width .3s}
+.bar-fill-bad{background:var(--bad);transition:width .3s}
+
+.spark-wrap{margin-top:14px;background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px}
+.spark-wrap .lbl{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
+#spark{width:100%;height:48px;display:block}
+
+.recent-list{display:flex;flex-direction:column;gap:6px}
+.recent-item{
+  display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;
+  background:var(--panel2);border:1px solid var(--border);font-size:11px;
+  animation:cardIn .25s ease;
+}
+.recent-item .ri-badge{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.recent-item .ri-badge.ok{background:var(--ok)}
+.recent-item .ri-badge.bad{background:var(--bad)}
+.recent-item .ri-badge.err{background:var(--warn)}
+.recent-item .ri-type{flex:1;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.recent-item .ri-lat{font-family:'JetBrains Mono',monospace;color:var(--dim);font-size:10px}
+
+#fileInput{display:none}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">C</div>
+  <h1>COSMAX Cosmetic QA Inspector
+    <small>moonshotai/kimi-k3-ultrafast · OpenGateway Vision</small>
+  </h1>
+  <div class="right">
+    <div class="pill" id="statusPill"><span class="dot" style="background:var(--dim)"></span> 대기</div>
+    <div class="pill">목표 <span id="targetTps">4.0</span> TPS</div>
+  </div>
+</header>
+
+<main>
+  <section class="feed">
+    <div class="feed-head">
+      <h2>라인 검사 피드</h2>
+      <div class="tps-card">
+        <span class="label">실측 TPS</span>
+        <span class="val" id="tpsVal">0.0</span>
+        <span class="unit">img/s</span>
+      </div>
+      <div class="speed-control">
+        속도
+        <input type="range" id="speedSlider" min="1" max="8" step="0.5" value="4">
+        <span id="speedLabel">4/s</span>
+      </div>
+      <div class="spacer"></div>
+      <div class="controls">
+        <button class="btn" onclick="document.getElementById('fileInput').click()">이미지 업로드</button>
+        <input type="file" id="fileInput" accept="image/*" multiple>
+        <button class="btn" id="demoBtn">데모 이미지</button>
+        <button class="btn primary" id="startBtn">▶ 시작</button>
+        <button class="btn danger" id="stopBtn" style="display:none">■ 정지</button>
+      </div>
+    </div>
+
+    <div class="spotlight" id="spotlight">
+      <div class="sl-badge wait">대기 중</div>
+      <div class="sl-text">
+        <div class="sl-title">검사를 시작하면 최신 결과가 여기에 표시됩니다</div>
+        <div class="sl-sub">—</div>
+      </div>
+    </div>
+
+    <div class="grid-scroll">
+      <div class="grid" id="grid"></div>
+    </div>
+  </section>
+
+  <aside class="stats">
+    <div class="stats-section">
+      <h3>누적 통계</h3>
+      <div class="big-stats">
+        <div class="stat-box"><div class="num" id="totalCnt">0</div><div class="lbl">총 검사</div></div>
+        <div class="stat-box rate"><div class="num" id="avgTps">0.0</div><div class="lbl">평균 TPS</div></div>
+        <div class="stat-box ok"><div class="num" id="okCnt">0</div><div class="lbl">정상</div></div>
+        <div class="stat-box bad"><div class="num" id="badCnt">0</div><div class="lbl">불량</div></div>
+      </div>
+      <div class="defect-rate-bar">
+        <div class="drl-label">
+          <span class="ok">정상 <span id="okPct">0%</span></span>
+          <span class="bad">불량 <span id="badPct">0%</span></span>
+        </div>
+        <div class="bar-track">
+          <div class="bar-fill-ok" id="barOk" style="width:50%"></div>
+          <div class="bar-fill-bad" id="barBad" style="width:50%"></div>
+        </div>
+      </div>
+      <div class="spark-wrap">
+        <div class="lbl">TPS 추이 (최근 60초)</div>
+        <canvas id="spark"></canvas>
+      </div>
+    </div>
+    <div class="stats-section" style="flex:1">
+      <h3>최근 판정</h3>
+      <div class="recent-list" id="recentList"></div>
+    </div>
+  </aside>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>
