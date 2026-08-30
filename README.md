@@ -1,4 +1,4 @@
-# COSMAX Cosmetic QA Inspector — Demo Studio
+# COSMAX Cosmetic QA Inspector — Demo Studio 
 
 > **Fictional customer demo.** Everything here — the "COSMAX" branding, the 4
 > production lines, the 200-unit run, the SKU numbering — is invented for the
