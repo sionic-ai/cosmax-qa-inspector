@@ -21,6 +21,18 @@ export const MAX_MODEL_LEN = 128;
 export const MAX_UNIT_ID_LEN = 64;
 export const MAX_CRITERIA_LEN = 4000;
 export const MAX_REFERENCE_NOTE_LEN = 500;
+const ROI_EPSILON = 1e-9;
+const REFERENCE_CROP_PADDING = 0.12;
+
+function normalizedReferenceRoi(value) {
+  if (!Array.isArray(value) || value.length !== 4 || value.some(v => typeof v !== "number" || !Number.isFinite(v))) return null;
+  const [x, y, w, h] = value;
+  if (x < -ROI_EPSILON || y < -ROI_EPSILON || w <= 0 || h <= 0 || x + w > 1 + ROI_EPSILON || y + h > 1 + ROI_EPSILON) return null;
+  const left = Math.max(0, Math.min(1, x));
+  const top = Math.max(0, Math.min(1, y));
+  const normalized = [left, top, Math.min(1, x + w) - left, Math.min(1, y + h) - top];
+  return normalized[2] > 0 && normalized[3] > 0 ? normalized : null;
+}
 
 export const DEFAULT_CRITERIA =
   "cap seating; label skew/wrinkle; seal damage; leakage/contamination; " +
@@ -110,7 +122,7 @@ export function validateBatchRequest(body) {
     for (let i = 0; i < references.length; i++) {
       const r = references[i];
       if (!r || typeof r !== "object") return { ok: false, error: `references[${i}] invalid` };
-      if (!onlyKeys(r, new Set(["label", "image", "note"]))) return { ok: false, error: `references[${i}] contains unknown fields` };
+      if (!onlyKeys(r, new Set(["label", "image", "note", "focus_roi"]))) return { ok: false, error: `references[${i}] contains unknown fields` };
       if (!["OK", "DEFECT"].includes(r.label)) return { ok: false, error: `references[${i}].label must be OK or DEFECT` };
       if (typeof r.image !== "string" || !DATA_URL_RE.test(r.image)) {
         return { ok: false, error: `references[${i}].image must be a valid data URL` };
@@ -121,6 +133,11 @@ export function validateBatchRequest(body) {
           return { ok: false, error: `references[${i}].note too long (>${MAX_REFERENCE_NOTE_LEN})` };
         }
         bytes += r.note.length;
+      }
+      if (r.focus_roi !== undefined) {
+        if (!normalizedReferenceRoi(r.focus_roi)) {
+          return { ok: false, error: `references[${i}].focus_roi must fit normalized 0..1 bounds` };
+        }
       }
       if (r.label === "OK") okCount++; else defCount++;
       bytes += r.image.length + r.label.length;
@@ -152,8 +169,13 @@ export function buildPromptMessages({ images, settings }) {
   const isFew = mode === "few_shot" && references.length > 0;
   const refBlock = isFew
     ? "\nReference examples follow (order preserved). Labels:\n" +
-      references.map((r, i) => `  #${i + 1} ${r.label}${r.note ? " — " + r.note : ""}`).join("\n") +
-      "\nLearn the visual difference between OK and DEFECT references before judging the target image(s)."
+      references.map((r, i) => {
+        const focus = r.focus_roi
+          ? ` — user-selected focus region [${r.focus_roi.map(v => Number(v).toFixed(3)).join(", ")}]; supplied visual prompt shows full context with a marked box and a magnified crop`
+          : "";
+        return `  #${i + 1} ${r.label}${r.note ? " — " + r.note : ""}${focus}`;
+      }).join("\n") +
+      "\nLearn the visual difference between OK and DEFECT references before judging the target image(s). When a focus region is supplied, treat it as visual guidance, not a coordinate-based hard rule. Prioritize corresponding visual evidence and ignore unrelated background differences. Use the full-image context to assess product identity, position, orientation, and alignment; the box itself must not determine the verdict."
     : "\nJudge in zero-shot mode from the criteria alone.";
 
   const header =
@@ -379,13 +401,15 @@ export function resolveStaticPath(urlPath, root) {
 
 // ─── ROI coordinate helpers ─────────────────────────────────────────
 export function roiToPixels(norm, canvasW, canvasH) {
-  const x = Math.round(clamp01(norm.x) * canvasW);
-  const y = Math.round(clamp01(norm.y) * canvasH);
-  let w = Math.round(clamp01(norm.w) * canvasW);
-  let h = Math.round(clamp01(norm.h) * canvasH);
-  if (x + w > canvasW) w = canvasW - x;
-  if (y + h > canvasH) h = canvasH - y;
-  return { x, y, w, h };
+  const width = Math.max(1, Math.round(Number(canvasW) || 1));
+  const height = Math.max(1, Math.round(Number(canvasH) || 1));
+  const nx = clamp01(norm.x), ny = clamp01(norm.y);
+  const nw = clamp01(norm.w), nh = clamp01(norm.h);
+  const x = Math.floor(nx * width);
+  const y = Math.floor(ny * height);
+  const right = nw > 0 ? Math.min(width, Math.ceil(clamp01(nx + nw) * width)) : x;
+  const bottom = nh > 0 ? Math.min(height, Math.ceil(clamp01(ny + nh) * height)) : y;
+  return { x, y, w: Math.max(0, right - x), h: Math.max(0, bottom - y) };
 }
 export function pixelsToRoi(px, canvasW, canvasH) {
   return {
@@ -396,6 +420,29 @@ export function pixelsToRoi(px, canvasW, canvasH) {
   };
 }
 
+function fitRect(sourceW, sourceH, box) {
+  const scale = Math.min(box.w / sourceW, box.h / sourceH);
+  const w = sourceW * scale, h = sourceH * scale;
+  return { x: box.x + (box.w - w) / 2, y: box.y + (box.h - h) / 2, w, h };
+}
+
+// Plan a model-agnostic visual prompt: full context with a marked ROI on the
+// left, and an enlarged crop on the right. Rendering stays in the browser.
+export function buildReferenceFocusPlan(roi, sourceW, sourceH) {
+  const normalized = normalizedReferenceRoi(roi);
+  if (!normalized) throw new Error("Reference ROI must fit normalized 0..1 bounds");
+  if (!(sourceW > 0) || !(sourceH > 0)) throw new Error("Reference image dimensions are invalid");
+  const [x, y, w, h] = normalized;
+  const padX = w * REFERENCE_CROP_PADDING, padY = h * REFERENCE_CROP_PADDING;
+  const cropLeft = Math.max(0, x - padX), cropTop = Math.max(0, y - padY);
+  const cropRight = Math.min(1, x + w + padX), cropBottom = Math.min(1, y + h + padY);
+  const cropSource = roiToPixels({ x: cropLeft, y: cropTop, w: cropRight - cropLeft, h: cropBottom - cropTop }, sourceW, sourceH);
+  const width = 1024, height = 512, pad = 24, labelH = 40;
+  const contextDest = fitRect(sourceW, sourceH, { x: pad, y: labelH, w: width / 2 - pad * 2, h: height - labelH - pad });
+  const cropDest = fitRect(cropSource.w, cropSource.h, { x: width / 2 + pad, y: labelH, w: width / 2 - pad * 2, h: height - labelH - pad });
+  return { width, height, cropSource, contextDest, cropDest };
+}
+
 // ─── Event-gate decision ────────────────────────────────────────────
 export function eventGateDecision({ changedPixels, totalPixels, threshold }) {
   if (!totalPixels || totalPixels <= 0) {
@@ -404,6 +451,41 @@ export function eventGateDecision({ changedPixels, totalPixels, threshold }) {
   const ratio = changedPixels / totalPixels;
   if (ratio >= threshold) return { inspect: true, ratio, reason: "change above threshold" };
   return { inspect: false, ratio, reason: "below threshold — skipped" };
+}
+
+// ─── Bounded browser video metadata loading ─────────────────────────
+// Uploaded media must not leave the UI waiting forever when a browser/codec
+// neither emits loadedmetadata nor an error. Listeners are installed before
+// load() to avoid missing a fast local-blob event.
+export function waitForVideoMetadata(video, timeoutMs = 10_000) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer;
+    const cleanup = () => {
+      clearTimeout(timer);
+      video.removeEventListener?.("loadedmetadata", onLoaded);
+      video.removeEventListener?.("error", onError);
+    };
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback(value);
+    };
+    const onLoaded = () => finish(resolve, video);
+    const onError = () => finish(reject, new Error("Video metadata decode failed"));
+    video.addEventListener("loadedmetadata", onLoaded, { once: true });
+    video.addEventListener("error", onError, { once: true });
+    timer = setTimeout(
+      () => finish(reject, new Error("Video metadata timeout")),
+      Math.max(1, Number(timeoutMs) || 10_000),
+    );
+    try {
+      video.load?.();
+    } catch (error) {
+      finish(reject, error);
+    }
+  });
 }
 
 // ─── Video snapshot scheduling ──────────────────────────────────────
@@ -501,6 +583,111 @@ export function buildUnitId({ line, index }) {
   const l = String(line || "L").replace(/\s+/g, "-");
   const i = Math.max(0, Math.floor(Number(index) || 0));
   return `${l}-${String(i + 1).padStart(4, "0")}`;
+}
+
+export function buildInspectionSettingsSnapshot({
+  line, model, mode, resolution, threshold, criteria, references = {}, referenceRois = {},
+}) {
+  const settings = { line, model, mode, resolution, threshold, criteria };
+  if (mode === "few_shot") {
+    const prepared = [];
+    for (const label of ["OK", "DEFECT"]) {
+      const image = references[label];
+      if (!image) throw new Error(`Missing ${label} reference for run snapshot`);
+      const roi = referenceRois[label] ? Object.freeze([...referenceRois[label]]) : null;
+      prepared.push(Object.freeze({
+        label,
+        image,
+        ...(label === "DEFECT" ? { note: roi ? "user-selected defect comparison region" : "reference defect" } : {}),
+        ...(roi ? {
+          focus_roi: roi,
+          ...(label === "OK" ? { note: "user-selected OK comparison region" } : {}),
+        } : {}),
+      }));
+    }
+    if (prepared.length > MAX_REFERENCES) throw new Error(`Reference count exceeds ${MAX_REFERENCES}`);
+    settings.references = Object.freeze(prepared);
+  }
+  return Object.freeze(settings);
+}
+
+// ─── Safe uploaded-raster header inspection ─────────────────────────
+export const MAX_REFERENCE_DIMENSION = 8192;
+export const MAX_REFERENCE_DECODED_PIXELS = 16_000_000;
+
+export function detectRasterDimensions(input) {
+  const bytes = input instanceof Uint8Array
+    ? input
+    : new Uint8Array(input instanceof ArrayBuffer ? input : input?.buffer || []);
+  if (bytes.length >= 24 &&
+      bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71 &&
+      bytes[4] === 13 && bytes[5] === 10 && bytes[6] === 26 && bytes[7] === 10 &&
+      bytes[12] === 73 && bytes[13] === 72 && bytes[14] === 68 && bytes[15] === 82) {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    return { width: view.getUint32(16), height: view.getUint32(20), format: "png" };
+  }
+  if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    const sof = new Set([0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf]);
+    let offset = 2;
+    while (offset + 3 < bytes.length) {
+      if (bytes[offset] !== 0xff) { offset += 1; continue; }
+      const marker = bytes[offset + 1];
+      if (marker === 0xd8 || marker === 0xd9 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+        offset += 2;
+        continue;
+      }
+      const length = (bytes[offset + 2] << 8) | bytes[offset + 3];
+      if (length < 2 || offset + 2 + length > bytes.length) break;
+      if (sof.has(marker) && length >= 7) {
+        const height = (bytes[offset + 5] << 8) | bytes[offset + 6];
+        const width = (bytes[offset + 7] << 8) | bytes[offset + 8];
+        return { width, height, format: "jpeg" };
+      }
+      offset += 2 + length;
+    }
+  }
+  throw new Error("Unsupported reference image format; use JPEG or PNG");
+}
+
+export function computeBoundedImageDimensions(width, height, maxSide = 1536) {
+  const w = Number(width), h = Number(height);
+  if (!Number.isInteger(w) || !Number.isInteger(h) || w <= 0 || h <= 0) {
+    throw new Error("Reference image dimensions are invalid");
+  }
+  if (w > MAX_REFERENCE_DIMENSION || h > MAX_REFERENCE_DIMENSION) {
+    throw new Error("Reference image dimensions exceed the safe limit");
+  }
+  if (w * h > MAX_REFERENCE_DECODED_PIXELS) {
+    throw new Error("Reference image pixel count exceeds the safe limit");
+  }
+  const limit = Math.max(1, Number(maxSide) || 1536);
+  const scale = Math.min(1, limit / Math.max(w, h));
+  return {
+    width: Math.max(1, Math.round(w * scale)),
+    height: Math.max(1, Math.round(h * scale)),
+  };
+}
+
+// ─── Latest-generation gate for browser async work ──────────────────
+// Each new operation invalidates prior completions; explicit clear/cancel calls
+// invalidate() so late FileReader/video/decode results cannot overwrite state.
+export function createGenerationGate() {
+  let generation = 0;
+  return {
+    issue() { generation += 1; return generation; },
+    invalidate() { generation += 1; },
+    isCurrent(token) { return token === generation; },
+  };
+}
+
+export function beginBoundedFileGeneration(gate, byteLength, maxBytes) {
+  if (!gate || typeof gate.issue !== "function") throw new Error("Generation gate is required");
+  const generation = gate.issue();
+  const size = Number(byteLength), limit = Number(maxBytes);
+  return {
+    generation,
+    accepted: Number.isFinite(size) && size >= 0 && Number.isFinite(limit) && limit >= 0 && size <= limit,
+  };
 }
 
 // ─── Run-token snapshot helpers (browser controller) ──────────────

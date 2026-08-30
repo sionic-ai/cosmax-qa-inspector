@@ -106,8 +106,10 @@
           <div class="fs-actions">
             <button class="btn btn-mini" id="fsOKGen" type="button">데모 생성</button>
             <label class="btn btn-mini">
-              업로드<input type="file" id="fsOKFile" accept="image/*" hidden>
+              업로드<input type="file" id="fsOKFile" accept="image/jpeg,image/png,.jpg,.jpeg,.png" hidden>
             </label>
+            <button class="btn btn-mini" id="fsOKCurrent" type="button">현재 화면</button>
+            <button class="btn btn-mini" id="fsOKFocus" type="button" disabled>영역 지정</button>
           </div>
         </div>
         <div class="fs-slot" data-slot="DEFECT">
@@ -121,10 +123,13 @@
           <div class="fs-actions">
             <button class="btn btn-mini" id="fsBadGen" type="button">데모 생성</button>
             <label class="btn btn-mini">
-              업로드<input type="file" id="fsBadFile" accept="image/*" hidden>
+              업로드<input type="file" id="fsBadFile" accept="image/jpeg,image/png,.jpg,.jpeg,.png" hidden>
             </label>
+            <button class="btn btn-mini" id="fsBadCurrent" type="button">현재 화면</button>
+            <button class="btn btn-mini" id="fsBadFocus" type="button" disabled>영역 지정</button>
           </div>
         </div>
+        <div class="fs-help">영상은 현재 미리보기 또는 추출 후 이동한 프레임에서 ‘현재 화면’을 누르세요. 영역 지정은 판정 hard rule이 아니라 VLM의 시각 가이드이며, 전체 맥락과 확대 ROI를 함께 전달합니다.</div>
       </div>
     </section>
 
@@ -335,6 +340,30 @@
   </aside>
 
 </main>
+
+<div class="ref-roi-modal" id="refRoiModal" role="dialog" aria-modal="true" aria-labelledby="refRoiTitle" hidden>
+  <div class="ref-roi-dialog">
+    <div class="ref-roi-head">
+      <div>
+        <div class="eyebrow">FEW-SHOT VISUAL PROMPT</div>
+        <h2 id="refRoiTitle">참조 이미지 집중 영역</h2>
+      </div>
+      <button class="tool" id="refRoiClose" type="button" aria-label="닫기">×</button>
+    </div>
+    <div class="ref-roi-canvas-shell">
+      <canvas id="refRoiCanvas" width="960" height="600" aria-label="참조 이미지 ROI 편집 캔버스"></canvas>
+      <div class="canvas-hint">드래그하여 VLM이 비교할 핵심 영역을 지정하세요</div>
+    </div>
+    <div class="ref-roi-foot">
+      <div class="hint" id="refRoiInfo">전체 이미지</div>
+      <div class="ref-roi-actions">
+        <button class="btn btn-mini" id="refRoiReset" type="button">전체 사용</button>
+        <button class="btn btn-mini" id="refRoiCancel" type="button">취소</button>
+        <button class="btn btn-primary btn-mini" id="refRoiSave" type="button">영역 적용</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script type="module" src="/app.js"></script>
 </body>

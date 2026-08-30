@@ -31,7 +31,13 @@ import {
   MIN_SNAPSHOT_FPS,
   MAX_SNAPSHOT_FPS,
   MAX_EXTRACTED_FRAMES,
-  MAX_REFERENCES,
+  buildReferenceFocusPlan,
+  waitForVideoMetadata,
+  createGenerationGate,
+  detectRasterDimensions,
+  computeBoundedImageDimensions,
+  buildInspectionSettingsSnapshot,
+  beginBoundedFileGeneration,
 } from "/lib/inspector.mjs";
 
 // ─── DOM helpers ────────────────────────────────────────────────────
@@ -54,6 +60,7 @@ const state = {
   running: false,
   extracting: false,
   runToken: null,          // fresh token per Start
+  activeRunSettings: null, // immutable settings/reference snapshot per run
   currentAbort: null,      // per-run AbortController for fetches + extractor
   produced: 0, processed: 0,
   ok: 0, bad: 0, skip: 0, review: 0, err: 0,
@@ -62,6 +69,9 @@ const state = {
   serverMode: "demo",
 
   references: { OK: null, DEFECT: null },
+  referenceSources: { OK: null, DEFECT: null },
+  referenceRois: { OK: null, DEFECT: null },
+  refEditor: { slot: null, canvas: null, sourceDataUrl: null, roi: null, dragging: false, start: null, drawRect: null },
   roiNorm: null,
   lastRoiPixels: null,
 
@@ -79,6 +89,11 @@ const state = {
 };
 
 const recent = [];
+const referenceGates = { OK: createGenerationGate(), DEFECT: createGenerationGate() };
+const uploadedVideoGate = createGenerationGate();
+const uploadedVideoPreviewGate = createGenerationGate();
+const referenceEditorGate = createGenerationGate();
+const MAX_REFERENCE_FILE_BYTES = 12 * 1024 * 1024;
 
 // ─── Config load ────────────────────────────────────────────────────
 async function loadConfig() {
@@ -454,6 +469,40 @@ function dataUrlToCanvas(dataUrl) {
   });
 }
 
+async function normalizeReferenceDataUrl(dataUrl, maxSide = 1536) {
+  let drawable;
+  let close = () => {};
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
+    if (blob.size > MAX_REFERENCE_FILE_BYTES) throw new Error("Reference image file exceeds the 12 MB limit");
+    const { width: sourceWidth, height: sourceHeight } = detectRasterDimensions(await blob.arrayBuffer());
+    const target = computeBoundedImageDimensions(sourceWidth, sourceHeight, maxSide);
+    if (typeof createImageBitmap === "function") {
+      try {
+        drawable = await createImageBitmap(blob, {
+          resizeWidth: target.width,
+          resizeHeight: target.height,
+          resizeQuality: "high",
+        });
+      } catch {
+        // Safe fallback: header limits cap a native decode at 16 MP / 8192px.
+        drawable = await createImageBitmap(blob);
+      }
+      close = () => drawable.close?.();
+    } else {
+      // Legacy fallback remains bounded by the validated 16 MP header limit.
+      drawable = await dataUrlToCanvas(dataUrl);
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = target.width;
+    canvas.height = target.height;
+    canvas.getContext("2d").drawImage(drawable, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.88);
+  } finally {
+    close();
+  }
+}
+
 function roiSignature(sampleCanvas) {
   const srcR = state.roiNorm
     ? roiToPixels(state.roiNorm, sampleCanvas.width, sampleCanvas.height)
@@ -481,24 +530,8 @@ function diffChangedPixels(a, b) {
 async function runBatch(units, signal) {
   const images = units.map(u => u.prepared.dataUrl);
   const unit_ids = units.map(u => u.id);
-  const settings = {
-    line: `Line-${state.line}`,
-    model: state.model,
-    mode: state.mode,
-    resolution: state.resolution,
-    threshold: state.threshold,
-    criteria: state.criteria,
-  };
-  if (state.mode === "few_shot") {
-    const refs = [];
-    if (state.references.OK)     refs.push({ label: "OK",     image: state.references.OK });
-    if (state.references.DEFECT) refs.push({ label: "DEFECT", image: state.references.DEFECT, note: "reference defect" });
-    if (!refs.some(r => r.label === "OK") || !refs.some(r => r.label === "DEFECT")) {
-      throw new Error("few-shot 모드에서 OK 참조와 DEFECT 참조가 각 1개 이상 필요합니다");
-    }
-    if (refs.length > MAX_REFERENCES) throw new Error(`참조 이미지는 ${MAX_REFERENCES}개를 초과할 수 없습니다`);
-    settings.references = refs;
-  }
+  const settings = state.activeRunSettings;
+  if (!settings) throw new Error("검사 실행 설정이 준비되지 않았습니다");
   const body = { images, settings, unit_ids };
   const t0 = performance.now();
   const r = await fetch("/api/inspect/batch", {
@@ -812,8 +845,9 @@ function bindControls() {
 
   on($("uploadVideoInput"), "change", async (e) => {
     const f = e.target.files?.[0]; if (!f) return;
-    await handleUploadedVideoFile(f);
+    // Clear immediately so selecting the same file again can supersede a pending decode.
     e.target.value = "";
+    await handleUploadedVideoFile(f);
   });
   on($("uploadVideoClear"), "click", () => { clearUploadedVideo(); updatePreviewForCurrentSource(); });
 
@@ -893,24 +927,173 @@ function refreshModelLabel() {
   $("modelLabel").textContent = `${state.model} · OpenGateway Vision`;
 }
 
+function renderReferencePreview(slotKey) {
+  const previewId = slotKey === "OK" ? "fsOKPreview" : "fsBadPreview";
+  const focusId = slotKey === "OK" ? "fsOKFocus" : "fsBadFocus";
+  const el = $(previewId);
+  el.innerHTML = "";
+  if (state.references[slotKey]) {
+    const img = document.createElement("img");
+    img.src = state.references[slotKey];
+    img.alt = `${slotKey} few-shot reference${state.referenceRois[slotKey] ? " with focus ROI" : ""}`;
+    el.appendChild(img);
+  } else {
+    const hint = document.createElement("span");
+    hint.className = "hint"; hint.textContent = "이미지 없음";
+    el.appendChild(hint);
+  }
+  $(focusId).disabled = !state.referenceSources[slotKey] || state.running;
+}
+
 function markFewShotFilled() {
-  const okSlot = document.querySelector('.fs-slot[data-slot="OK"]');
-  const badSlot = document.querySelector('.fs-slot[data-slot="DEFECT"]');
-  if (okSlot)  okSlot.classList.toggle("is-filled", !!state.references.OK);
-  if (badSlot) badSlot.classList.toggle("is-filled", !!state.references.DEFECT);
+  for (const slotKey of ["OK", "DEFECT"]) {
+    const slot = document.querySelector(`.fs-slot[data-slot="${slotKey}"]`);
+    if (!slot) continue;
+    slot.classList.toggle("is-filled", !!state.references[slotKey]);
+    slot.classList.toggle("has-focus", !!state.referenceRois[slotKey]);
+    const req = slot.querySelector(".fs-req");
+    if (req) req.textContent = state.referenceRois[slotKey] ? "ROI" : (state.references[slotKey] ? "준비" : "필수");
+  }
+}
+
+function setReferenceSlot(slotKey, dataUrl) {
+  referenceGates[slotKey].invalidate();
+  if (state.refEditor.slot === slotKey) closeReferenceEditor();
+  state.referenceSources[slotKey] = dataUrl;
+  state.referenceRois[slotKey] = null;
+  state.references[slotKey] = dataUrl;
+  renderReferencePreview(slotKey);
+  markFewShotFilled();
+}
+
+function renderReferenceFocusComposite(source, roi) {
+  const plan = buildReferenceFocusPlan(roi, source.width, source.height);
+  const c = document.createElement("canvas");
+  c.width = plan.width; c.height = plan.height;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = "#080b10"; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.fillStyle = "#dce3ee"; ctx.font = "700 18px Inter, sans-serif";
+  ctx.fillText("FULL CONTEXT", 24, 28);
+  ctx.fillText("FOCUS REGION × ZOOM", c.width / 2 + 24, 28);
+  const a = plan.contextDest, b = plan.cropDest, s = plan.cropSource;
+  ctx.drawImage(source, a.x, a.y, a.w, a.h);
+  ctx.drawImage(source, s.x, s.y, s.w, s.h, b.x, b.y, b.w, b.h);
+  const rx = a.x + roi[0] * a.w, ry = a.y + roi[1] * a.h;
+  const rw = roi[2] * a.w, rh = roi[3] * a.h;
+  // Keep evidence pixels untouched: draw the cue just outside the selected edge.
+  ctx.strokeStyle = "#14b8a6"; ctx.lineWidth = 3;
+  ctx.strokeRect(rx - 3, ry - 3, rw + 6, rh + 6);
+  ctx.strokeStyle = "rgba(255,255,255,.12)"; ctx.lineWidth = 1;
+  ctx.strokeRect(b.x, b.y, b.w, b.h);
+  return c.toDataURL("image/jpeg", 0.9);
+}
+
+function renderReferenceEditor() {
+  const ed = state.refEditor, canvas = $("refRoiCanvas");
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#080b10"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  if (!ed.canvas) return;
+  const scale = Math.min(canvas.width / ed.canvas.width, canvas.height / ed.canvas.height);
+  const dr = {
+    x: (canvas.width - ed.canvas.width * scale) / 2,
+    y: (canvas.height - ed.canvas.height * scale) / 2,
+    w: ed.canvas.width * scale,
+    h: ed.canvas.height * scale,
+  };
+  ed.drawRect = dr;
+  ctx.drawImage(ed.canvas, dr.x, dr.y, dr.w, dr.h);
+  if (ed.roi) {
+    const [x, y, w, h] = ed.roi;
+    const px = { x: dr.x + x * dr.w, y: dr.y + y * dr.h, w: w * dr.w, h: h * dr.h };
+    ctx.save();
+    ctx.fillStyle = "rgba(4,7,10,.58)";
+    ctx.fillRect(dr.x, dr.y, dr.w, px.y - dr.y);
+    ctx.fillRect(dr.x, px.y + px.h, dr.w, dr.y + dr.h - px.y - px.h);
+    ctx.fillRect(dr.x, px.y, px.x - dr.x, px.h);
+    ctx.fillRect(px.x + px.w, px.y, dr.x + dr.w - px.x - px.w, px.h);
+    ctx.strokeStyle = "#14b8a6"; ctx.lineWidth = 3; ctx.setLineDash([10, 6]);
+    ctx.strokeRect(px.x, px.y, px.w, px.h); ctx.restore();
+    $("refRoiInfo").textContent = `ROI ${(x * 100).toFixed(1)}%, ${(y * 100).toFixed(1)}% · ${(w * 100).toFixed(1)}% × ${(h * 100).toFixed(1)}%`;
+  } else {
+    $("refRoiInfo").textContent = "전체 이미지 사용";
+  }
+}
+
+async function openReferenceEditor(slotKey) {
+  const dataUrl = state.referenceSources[slotKey];
+  if (!dataUrl) return showStartError("먼저 참조 이미지를 준비하세요.");
+  const generation = referenceEditorGate.issue();
+  try {
+    const canvas = await dataUrlToCanvas(dataUrl);
+    if (!referenceEditorGate.isCurrent(generation) || state.referenceSources[slotKey] !== dataUrl) return;
+    state.refEditor = {
+      slot: slotKey, canvas,
+      sourceDataUrl: dataUrl,
+      roi: state.referenceRois[slotKey] ? [...state.referenceRois[slotKey]] : null,
+      dragging: false, start: null, drawRect: null,
+    };
+    $("refRoiTitle").textContent = `${slotKey} 참조 · 집중 영역`;
+    $("refRoiModal").hidden = false;
+    renderReferenceEditor();
+  } catch (e) {
+    if (referenceEditorGate.isCurrent(generation) && state.referenceSources[slotKey] === dataUrl) {
+      showStartError(e.message || "참조 이미지를 열 수 없습니다.");
+    }
+  }
+}
+
+function closeReferenceEditor() {
+  referenceEditorGate.invalidate();
+  $("refRoiModal").hidden = true;
+  state.refEditor = { slot: null, canvas: null, sourceDataUrl: null, roi: null, dragging: false, start: null, drawRect: null };
+}
+
+function bindReferenceEditor() {
+  const canvas = $("refRoiCanvas");
+  const point = (e) => canvasCoordFromEvent(e, canvas);
+  on(canvas, "pointerdown", (e) => {
+    const ed = state.refEditor, dr = ed.drawRect; if (!ed.canvas || !dr) return;
+    const p = point(e);
+    if (p.x < dr.x || p.x > dr.x + dr.w || p.y < dr.y || p.y > dr.y + dr.h) return;
+    ed.dragging = true; ed.start = p; canvas.setPointerCapture?.(e.pointerId);
+  });
+  on(canvas, "pointermove", (e) => {
+    const ed = state.refEditor, dr = ed.drawRect; if (!ed.dragging || !dr) return;
+    const p = point(e);
+    const x1 = Math.max(dr.x, Math.min(ed.start.x, p.x));
+    const y1 = Math.max(dr.y, Math.min(ed.start.y, p.y));
+    const x2 = Math.min(dr.x + dr.w, Math.max(ed.start.x, p.x));
+    const y2 = Math.min(dr.y + dr.h, Math.max(ed.start.y, p.y));
+    ed.roi = [(x1 - dr.x) / dr.w, (y1 - dr.y) / dr.h, (x2 - x1) / dr.w, (y2 - y1) / dr.h];
+    renderReferenceEditor();
+  });
+  const end = () => {
+    const ed = state.refEditor;
+    if (ed.dragging && ed.roi && (ed.roi[2] < 0.03 || ed.roi[3] < 0.03)) ed.roi = null;
+    ed.dragging = false; ed.start = null; renderReferenceEditor();
+  };
+  on(canvas, "pointerup", end); on(canvas, "pointercancel", end);
+  on($("refRoiReset"), "click", () => { state.refEditor.roi = null; renderReferenceEditor(); });
+  on($("refRoiCancel"), "click", closeReferenceEditor);
+  on($("refRoiClose"), "click", closeReferenceEditor);
+  on($("refRoiSave"), "click", () => {
+    const ed = state.refEditor; if (!ed.slot || !ed.canvas) return;
+    if (state.referenceSources[ed.slot] !== ed.sourceDataUrl) {
+      closeReferenceEditor();
+      showStartError("참조 이미지가 변경되었습니다. 새 이미지에서 영역을 다시 지정하세요.");
+      return;
+    }
+    state.referenceRois[ed.slot] = ed.roi ? [...ed.roi] : null;
+    state.references[ed.slot] = ed.roi
+      ? renderReferenceFocusComposite(ed.canvas, ed.roi)
+      : state.referenceSources[ed.slot];
+    renderReferencePreview(ed.slot); markFewShotFilled(); closeReferenceEditor();
+  });
+  on($("refRoiModal"), "click", (e) => { if (e.target === $("refRoiModal")) closeReferenceEditor(); });
+  on(document, "keydown", (e) => { if (e.key === "Escape" && !$("refRoiModal").hidden) closeReferenceEditor(); });
 }
 
 function bindFewShot() {
-  const setSlot = (slotKey, dataUrl) => {
-    state.references[slotKey] = dataUrl;
-    const previewId = slotKey === "OK" ? "fsOKPreview" : "fsBadPreview";
-    const el = $(previewId);
-    el.innerHTML = "";
-    const img = document.createElement("img");
-    img.src = dataUrl;
-    el.appendChild(img);
-    markFewShotFilled();
-  };
   const genFor = (slotKey) => {
     const isDefect = slotKey === "DEFECT";
     const palette = LINE_PALETTES[state.line] || LINE_PALETTES.A;
@@ -920,21 +1103,53 @@ function bindFewShot() {
       ? { type: "cap-tilt", magnitude: 12, bbox: [0.34, 0.18, 0.66, 0.35], severity: "high" }
       : null;
     drawPackage(c.getContext("2d"), c.width, c.height, palette, plan, `ref-${slotKey}-${state.line}`);
-    setSlot(slotKey, c.toDataURL("image/jpeg", 0.85));
+    setReferenceSlot(slotKey, c.toDataURL("image/jpeg", 0.85));
   };
   on($("fsOKGen"),  "click", () => genFor("OK"));
   on($("fsBadGen"), "click", () => genFor("DEFECT"));
 
   const bindFile = (inputId, slotKey) => {
-    on($(inputId), "change", async (e) => {
+    on($(inputId), "change", (e) => {
       const f = e.target.files?.[0]; if (!f) return;
+      // Issue first: a rejected newer selection must invalidate older work.
+      const selection = beginBoundedFileGeneration(referenceGates[slotKey], f.size, MAX_REFERENCE_FILE_BYTES);
+      if (!selection.accepted) {
+        e.target.value = "";
+        showStartError("참조 이미지는 12 MB 이하여야 합니다.");
+        return;
+      }
+      const generation = selection.generation;
       const reader = new FileReader();
-      reader.onload = () => setSlot(slotKey, reader.result);
+      reader.onload = async () => {
+        try {
+          const normalized = await normalizeReferenceDataUrl(reader.result);
+          if (!referenceGates[slotKey].isCurrent(generation)) return;
+          setReferenceSlot(slotKey, normalized);
+        } catch (error) {
+          if (referenceGates[slotKey].isCurrent(generation)) {
+            showStartError(error.message || "참조 이미지를 준비할 수 없습니다.");
+          }
+        }
+      };
+      reader.onerror = () => {
+        if (referenceGates[slotKey].isCurrent(generation)) showStartError("참조 이미지 파일을 읽을 수 없습니다.");
+      };
       reader.readAsDataURL(f);
+      e.target.value = "";
     });
   };
   bindFile("fsOKFile", "OK");
   bindFile("fsBadFile", "DEFECT");
+
+  const useCurrent = (slotKey) => {
+    if (!state.currentSample?.canvas) return showStartError("먼저 이미지 또는 영상 프레임을 미리보기에 표시하세요.");
+    setReferenceSlot(slotKey, state.currentSample.canvas.toDataURL("image/jpeg", 0.9));
+  };
+  on($("fsOKCurrent"), "click", () => useCurrent("OK"));
+  on($("fsBadCurrent"), "click", () => useCurrent("DEFECT"));
+  on($("fsOKFocus"), "click", () => openReferenceEditor("OK"));
+  on($("fsBadFocus"), "click", () => openReferenceEditor("DEFECT"));
+  bindReferenceEditor();
 }
 
 // ─── New sample action ─────────────────────────────────────────────
@@ -970,6 +1185,27 @@ async function startRun() {
   const v = validateStart();
   if (!v.ok) { showStartError(v.error); return; }
   showStartError("");
+
+  // Cancel pending reference decodes/editor opens, then freeze one immutable
+  // reference/settings snapshot so every batch in this run sees identical input.
+  referenceGates.OK.invalidate();
+  referenceGates.DEFECT.invalidate();
+  closeReferenceEditor();
+  try {
+    state.activeRunSettings = buildInspectionSettingsSnapshot({
+      line: `Line-${state.line}`,
+      model: state.model,
+      mode: state.mode,
+      resolution: state.resolution,
+      threshold: state.threshold,
+      criteria: state.criteria,
+      references: state.references,
+      referenceRois: state.referenceRois,
+    });
+  } catch (e) {
+    showStartError(e.message || String(e));
+    return;
+  }
 
   // Every run gets a fresh token + AbortController. Extractor and producer
   // capture the token; Stop invalidates them all at once.
@@ -1040,6 +1276,7 @@ function stopRun(finished) {
   // Invalidate token first so any in-flight loop no-ops on wake.
   state.running = false;
   state.runToken = null;
+  state.activeRunSettings = null;
   try { state.currentAbort?.abort(); } catch { /* noop */ }
   state.currentAbort = null;
   state.extracting = false;
@@ -1220,6 +1457,8 @@ function renderThumb(item, idx, selectable, kind) {
 // ─── Upload video ──────────────────────────────────────────────────
 async function handleUploadedVideoFile(file) {
   clearUploadedVideo();
+  const generation = uploadedVideoGate.issue();
+  $("uploadVideoMeta").textContent = `${file.name} · 영상 메타데이터 확인 중…`;
   const url = URL.createObjectURL(file);
   const video = document.createElement("video");
   video.preload = "metadata";
@@ -1227,13 +1466,18 @@ async function handleUploadedVideoFile(file) {
   video.playsInline = true;
   video.src = url;
   try {
-    await new Promise((resolve, reject) => {
-      video.addEventListener("loadedmetadata", resolve, { once: true });
-      video.addEventListener("error", () => reject(new Error("영상 디코딩 실패 — 브라우저가 지원하지 않는 코덱일 수 있습니다.")), { once: true });
-    });
+    await waitForVideoMetadata(video);
   } catch (e) {
     URL.revokeObjectURL(url);
-    showStartError(e.message);
+    if (!uploadedVideoGate.isCurrent(generation)) return;
+    $("uploadVideoMeta").textContent = `${file.name} · 영상 읽기 실패`;
+    showStartError(e.message.includes("timeout")
+      ? "영상 메타데이터를 불러오는 시간이 초과되었습니다. 다른 코덱 또는 파일을 사용해 주세요."
+      : "영상 디코딩 실패 — 브라우저가 지원하지 않는 코덱일 수 있습니다.");
+    return;
+  }
+  if (!uploadedVideoGate.isCurrent(generation)) {
+    URL.revokeObjectURL(url);
     return;
   }
   const store = state.sources["upload-video"];
@@ -1247,6 +1491,8 @@ async function handleUploadedVideoFile(file) {
 }
 
 function clearUploadedVideo() {
+  uploadedVideoGate.invalidate();
+  uploadedVideoPreviewGate.invalidate();
   const store = state.sources["upload-video"];
   const v = store.video;
   if (v && v.url) { try { URL.revokeObjectURL(v.url); } catch { /* noop */ } }
@@ -1325,6 +1571,7 @@ async function extractFramesForVideoSource(myToken) {
     }
   } else {
     // upload-video: seek + drawImage, robust to same-currentTime and abort.
+    uploadedVideoPreviewGate.invalidate();
     const video = store.video?.videoEl;
     if (!video) throw new Error("영상 소스가 유효하지 않습니다.");
     try { await video.play().catch(() => {}); video.pause(); } catch { /* noop */ }
@@ -1492,6 +1739,8 @@ async function setPreview(idx) {
   const id = it.id || it.name || `preview-${i}`;
   let canvas = it.canvas;
   if (!canvas && it.dataUrl) {
+    state.currentSample = null;
+    renderPreviewNav();
     try { canvas = await dataUrlToCanvas(it.dataUrl); }
     catch (e) { showStartError(e.message); return; }
   }
@@ -1506,6 +1755,48 @@ async function setPreview(idx) {
   if (state.sourceKind === "sample-images") renderSampleThumbs();
 }
 
+async function previewUploadedVideoFrame(store) {
+  const storedVideo = store.video;
+  if (!storedVideo?.url || !(storedVideo.duration > 0)) return;
+  const generation = uploadedVideoPreviewGate.issue();
+  const video = document.createElement("video");
+  video.preload = "metadata";
+  video.muted = true;
+  video.playsInline = true;
+  video.src = storedVideo.url;
+  const target = Math.min(Math.max(0, storedVideo.duration / 2), Math.max(0, storedVideo.duration - 0.01));
+  try {
+    await waitForVideoMetadata(video);
+    await seekVideo(video, target);
+    if (!uploadedVideoPreviewGate.isCurrent(generation) ||
+        state.sourceKind !== "upload-video" ||
+        state.sources["upload-video"] !== store ||
+        store.video !== storedVideo) return;
+    const canvas = document.createElement("canvas");
+    canvas.width = state.resolution;
+    canvas.height = state.resolution;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#080c12";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Match the center-crop used by extractFramesForVideoSource exactly.
+    const fit = Math.max(canvas.width / video.videoWidth, canvas.height / video.videoHeight);
+    const w = video.videoWidth * fit, h = video.videoHeight * fit;
+    ctx.drawImage(video, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+    state.currentSample = { canvas, seed: `${storedVideo.name}-preview`, unitId: `${storedVideo.name} · 중간 프레임`, plan: null };
+    $("serialLabel").textContent = `${storedVideo.name} · 중간 프레임`;
+    state.lastRoiPixels = null;
+    renderRoiCanvas();
+    renderPreviewNav();
+  } catch (e) {
+    if (uploadedVideoPreviewGate.isCurrent(generation) &&
+        state.sourceKind === "upload-video" && store.video === storedVideo) {
+      showStartError(`영상 미리보기 실패: ${e.message}`);
+    }
+  } finally {
+    try { video.pause(); video.removeAttribute("src"); video.load(); } catch { /* noop */ }
+  }
+}
+
 function updatePreviewForCurrentSource() {
   const kind = state.sourceKind;
   const s = src();
@@ -1518,6 +1809,14 @@ function updatePreviewForCurrentSource() {
     state.lastRoiPixels = null;
     renderRoiCanvas();
     renderPreviewNav();
+    return;
+  }
+  if (kind === "upload-video" && s.video && !s.extractedFrames.length) {
+    state.currentSample = null;
+    $("serialLabel").textContent = "영상 프레임 준비 중…";
+    renderRoiCanvas();
+    renderPreviewNav();
+    previewUploadedVideoFrame(s);
     return;
   }
   const list = previewables();
@@ -1537,6 +1836,9 @@ function renderPreviewNav() {
   const prev = $("previewPrev"), next = $("previewNext");
   const kind = state.sourceKind;
   const s = src();
+  const captureDisabled = !state.currentSample || state.running || state.extracting;
+  $("fsOKCurrent").disabled = captureDisabled;
+  $("fsBadCurrent").disabled = captureDisabled;
   if (!total) {
     if (kind === "sample-images" && s.scenario === "synthetic-200") el.textContent = "합성 200";
     else if (kind === "sample-video") el.textContent = "샘플 영상 · 추출 전";
@@ -1621,6 +1923,10 @@ function setControlsDisabled(disabled) {
     "fsOKGen", "fsBadGen", "fsOKFile", "fsBadFile",
   ];
   ids.forEach(id => { const el = $(id); if (el) el.disabled = disabled; });
+  $("fsOKCurrent").disabled = disabled || !state.currentSample;
+  $("fsBadCurrent").disabled = disabled || !state.currentSample;
+  $("fsOKFocus").disabled = disabled || !state.referenceSources.OK;
+  $("fsBadFocus").disabled = disabled || !state.referenceSources.DEFECT;
   document.querySelectorAll(".src-tab, .line-btn, .seg-btn").forEach(el => { el.disabled = disabled; });
   const reset = $("resetBtn"); if (reset) reset.disabled = disabled;
   const totalInp = $("totalUnits");

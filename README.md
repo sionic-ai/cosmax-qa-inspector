@@ -35,7 +35,7 @@ npm start
 Node 20+ required. No dependencies to install.
 
 ```bash
-npm test    # node:test suite (94 tests)
+npm test    # node:test suite (109 tests)
 npm run check   # syntax check for server + browser modules
 ```
 
@@ -83,7 +83,8 @@ readinessProbe:
   Run length is determined by the selected source (see
   "Media workflow" below).
 - Zero-shot judgment against an editable criteria prompt, or few-shot with at
-  least one OK and one DEFECT reference image (uploaded or generated).
+  least one OK and one DEFECT reference image (uploaded, generated, or captured
+  from the current image/video frame). Each reference may have its own focus ROI.
 - Client-drawn cosmetic package images with subtle defects (cap tilt, label
   skew, seal damage, leak, print blur, scratch, foreign particle).
 - ROI editor (drag on the preview canvas) with previous/next preview
@@ -218,6 +219,33 @@ finite list to navigate).
   `변화 X.X%` meta line, visibly distinct from inspected results.
 - Enable the gate to demonstrate client-side pre-filtering; lower the threshold
   to inspect more subtle changes or raise it to skip more frames.
+
+### Few-shot reference focus regions
+
+OK and DEFECT references have independent optional focus ROIs. Click **현재
+화면** to capture the current image or extracted video frame, then **영역 지정**
+to draw the comparison region. Applying it creates one browser-side visual
+prompt containing:
+
+1. the full reference image with a high-contrast ROI box; and
+2. a magnified crop with 12% padding around that ROI.
+
+The server also validates and describes the normalized `focus_roi` in the
+few-shot prompt. This dual view is intentional: a crop raises effective detail
+resolution while the full view preserves package context. It does not claim
+pixel-perfect model grounding; accuracy still depends on model capability and
+should be compared against the unmarked few-shot baseline on representative
+line images.
+
+The focus rectangle is **soft visual guidance, not a coordinate hard rule**.
+The prompt tells the VLM to prioritize corresponding local evidence, ignore
+unrelated background differences, and use the full image for product identity,
+position, orientation and alignment. The box itself never determines the
+verdict. We chose this provider-agnostic representation over crop-only or
+coordinates-only prompting because it preserves global context while increasing
+the effective detail of small cosmetic defects. The complete decision record,
+alternatives, evidence, limitations and customer-data A/B plan are in
+[`docs/few-shot-reference-roi-rationale.md`](docs/few-shot-reference-roi-rationale.md).
 
 ---
 
