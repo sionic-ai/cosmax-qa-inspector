@@ -5,309 +5,337 @@
 <meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>COSMAX · Cosmetic Line QA Inspector</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
-<style>
-:root{
-  --bg:#0a0e1a; --panel:#121826; --panel2:#1a2236; --border:#232c43;
-  --txt:#e6ecf5; --dim:#7b89a8; --accent:#4f8cff; --accent2:#6ee7f0;
-  --ok:#22c55e; --bad:#ef4444; --warn:#f59e0b;
-  --r:14px;
-}
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
-body{
-  font-family:'Inter',system-ui,sans-serif;
-  background:var(--bg);color:var(--txt);
-  display:flex;flex-direction:column;
-  overflow:hidden;
-}
-
-/* ── Header ─────────────────────────────── */
-header{
-  display:flex;align-items:center;gap:14px;
-  padding:14px 24px;
-  background:linear-gradient(90deg,rgba(79,140,255,.08),transparent);
-  border-bottom:1px solid var(--border);
-  flex-shrink:0;
-}
-.logo{
-  width:38px;height:38px;border-radius:10px;
-  background:linear-gradient(135deg,var(--accent),var(--accent2));
-  display:flex;align-items:center;justify-content:center;
-  font-weight:800;color:#0a0e1a;font-size:18px;
-  box-shadow:0 0 24px rgba(79,140,255,.35);
-}
-header h1{font-size:17px;font-weight:700;letter-spacing:-.02em}
-header h1 small{display:block;font-size:11px;color:var(--dim);font-weight:400;letter-spacing:0;margin-top:1px}
-header .right{margin-left:auto;display:flex;gap:8px;align-items:center}
-.pill{
-  font-size:11px;font-weight:600;padding:5px 11px;border-radius:20px;
-  background:var(--panel2);border:1px solid var(--border);color:var(--dim);
-  display:flex;align-items:center;gap:6px;
-}
-.pill .dot{width:7px;height:7px;border-radius:50%}
-.pill.live .dot{background:var(--ok);animation:pulse 1.5s infinite}
-.pill.live{color:var(--ok);border-color:rgba(34,197,94,.3)}
-.pill.err .dot{background:var(--bad);animation:pulse 1s infinite}
-.pill.err{color:var(--bad);border-color:rgba(239,68,68,.3)}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-
-/* ── Layout ─────────────────────────────── */
-main{flex:1;display:grid;grid-template-columns:1fr 380px;gap:0;overflow:hidden}
-
-/* Left: feed */
-.feed{display:flex;flex-direction:column;overflow:hidden;border-right:1px solid var(--border)}
-.feed-head{padding:14px 22px 10px;display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-.feed-head h2{font-size:14px;font-weight:600}
-.feed-head .spacer{flex:1}
-
-.tps-card{
-  background:var(--panel);border:1px solid var(--border);border-radius:var(--r);
-  padding:10px 16px;display:flex;align-items:baseline;gap:6px;
-}
-.tps-card .label{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.08em}
-.tps-card .val{font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:700;color:var(--accent2);min-width:54px}
-.tps-card .unit{font-size:12px;color:var(--dim)}
-
-.controls{display:flex;gap:8px;align-items:center}
-.btn{
-  font-family:inherit;font-size:13px;font-weight:600;
-  padding:8px 18px;border-radius:10px;border:1px solid var(--border);
-  background:var(--panel2);color:var(--txt);cursor:pointer;
-  transition:.15s;
-}
-.btn:hover{border-color:var(--accent);color:var(--accent)}
-.btn.primary{background:linear-gradient(135deg,var(--accent),#3b6fd4);border-color:transparent;color:#fff}
-.btn.primary:hover{filter:brightness(1.1)}
-.btn.danger{background:linear-gradient(135deg,#ef4444,#dc2626);border-color:transparent;color:#fff}
-
-.speed-control{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim)}
-.speed-control input{width:80px;accent-color:var(--accent)}
-
-/* Spotlight — latest result */
-.spotlight{
-  display:flex;align-items:center;gap:14px;
-  padding:10px 22px;
-  background:var(--panel);
-  border-bottom:1px solid var(--border);
-  min-height:64px;
-}
-.spotlight .sl-img{
-  width:48px;height:48px;border-radius:8px;object-fit:cover;
-  border:2px solid var(--border);
-}
-.spotlight .sl-img.ok{border-color:var(--ok)}
-.spotlight .sl-img.bad{border-color:var(--bad)}
-.spotlight .sl-text{flex:1}
-.spotlight .sl-text .sl-title{font-size:13px;font-weight:600}
-.spotlight .sl-text .sl-sub{font-size:11px;color:var(--dim);font-family:'JetBrains Mono',monospace;margin-top:2px}
-.spotlight .sl-badge{
-  font-size:12px;font-weight:700;padding:6px 14px;border-radius:8px;
-}
-.spotlight .sl-badge.ok{background:rgba(34,197,94,.15);color:#4ade80;border:1px solid rgba(34,197,94,.3)}
-.spotlight .sl-badge.bad{background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid rgba(239,68,68,.3)}
-.spotlight .sl-badge.wait{background:rgba(79,140,255,.1);color:#93c5fd;border:1px solid rgba(79,140,255,.2)}
-
-
-/* Model selector */
-.model-select-wrap{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim)}
-.model-select{
-  font-family:inherit;font-size:12px;font-weight:600;
-  padding:7px 12px;border-radius:8px;border:1px solid var(--border);
-  background:var(--panel2);color:var(--txt);cursor:pointer;outline:none;
-  transition:.15s;
-}
-.model-select:hover{border-color:var(--accent)}
-.model-select:focus{border-color:var(--accent)}
-.model-select option{background:var(--panel2);color:var(--txt)}
-
-/* Grid */
-.grid-scroll{flex:1;overflow-y:auto;padding:8px 22px 22px}
-.grid{
-  display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(220px,1fr));
-  gap:12px;
-}
-.card{
-  background:var(--panel);border:1px solid var(--border);border-radius:var(--r);
-  overflow:hidden;position:relative;
-  transition:.2s;
-  animation:cardIn .3s ease;
-}
-@keyframes cardIn{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
-.card.defect{border-color:var(--bad);box-shadow:0 0 20px rgba(239,68,68,.15)}
-.card.ok{border-color:rgba(34,197,94,.3)}
-.card.pending .overlay{background:rgba(79,140,255,.12)}
-
-.card .img-wrap{aspect-ratio:1;background:#0d1117;position:relative;overflow:hidden}
-.card img{width:100%;height:100%;object-fit:cover;display:block}
-.card .img-wrap::after{
-  content:'';position:absolute;inset:0;
-  background:linear-gradient(to top,rgba(10,14,26,.6),transparent 40%);
-}
-.card .overlay{
-  position:absolute;inset:0;display:flex;flex-direction:column;justify-content:space-between;
-  padding:8px 10px;
-}
-.badge{
-  align-self:flex-start;font-size:10px;font-weight:700;padding:3px 8px;border-radius:6px;
-  text-transform:uppercase;letter-spacing:.05em;
-  backdrop-filter:blur(6px);
-}
-.badge.ok{background:rgba(34,197,94,.2);color:#4ade80;border:1px solid rgba(34,197,94,.4)}
-.badge.bad{background:rgba(239,68,68,.2);color:#fca5a5;border:1px solid rgba(239,68,68,.4)}
-.badge.wait{background:rgba(79,140,255,.15);color:#93c5fd;border:1px solid rgba(79,140,255,.3)}
-.badge.err{background:rgba(245,158,11,.2);color:#fcd34d;border:1px solid rgba(245,158,11,.4)}
-
-.card .info{padding:8px 10px 10px;font-size:11px}
-.card .info .type{font-weight:600;color:var(--txt);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.card .info .meta{display:flex;justify-content:space-between;color:var(--dim);font-family:'JetBrains Mono',monospace;font-size:10px}
-.card .info .conf{color:var(--accent2)}
-
-.scanline{
-  position:absolute;left:0;right:0;height:2px;
-  background:linear-gradient(90deg,transparent,var(--accent2),transparent);
-  animation:scan .8s linear infinite;
-  pointer-events:none;
-}
-@keyframes scan{0%{top:0}100%{top:100%}}
-
-/* ── Right panel: stats ─────────────────── */
-.stats{display:flex;flex-direction:column;overflow-y:auto;background:var(--panel)}
-.stats-section{padding:18px 22px;border-bottom:1px solid var(--border)}
-.stats-section h3{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin-bottom:12px;font-weight:600}
-
-.big-stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.stat-box{
-  background:var(--panel2);border:1px solid var(--border);border-radius:10px;
-  padding:12px 14px;
-}
-.stat-box .num{font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:700}
-.stat-box .lbl{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-top:2px}
-.stat-box.ok .num{color:var(--ok)}
-.stat-box.bad .num{color:var(--bad)}
-.stat-box.rate .num{color:var(--accent2)}
-
-.defect-rate-bar{
-  margin-top:12px;background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px;
-}
-.defect-rate-bar .drl-label{display:flex;justify-content:space-between;font-size:11px;margin-bottom:6px}
-.defect-rate-bar .drl-label .ok{color:var(--ok)}
-.defect-rate-bar .drl-label .bad{color:var(--bad)}
-.bar-track{height:8px;border-radius:4px;background:var(--border);overflow:hidden;display:flex}
-.bar-fill-ok{background:var(--ok);transition:width .3s}
-.bar-fill-bad{background:var(--bad);transition:width .3s}
-
-.spark-wrap{margin-top:14px;background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:12px}
-.spark-wrap .lbl{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px}
-#spark{width:100%;height:48px;display:block}
-
-.recent-list{display:flex;flex-direction:column;gap:6px}
-.recent-item{
-  display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;
-  background:var(--panel2);border:1px solid var(--border);font-size:11px;
-  animation:cardIn .25s ease;
-}
-.recent-item .ri-badge{width:6px;height:6px;border-radius:50%;flex-shrink:0}
-.recent-item .ri-badge.ok{background:var(--ok)}
-.recent-item .ri-badge.bad{background:var(--bad)}
-.recent-item .ri-badge.err{background:var(--warn)}
-.recent-item .ri-type{flex:1;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.recent-item .ri-lat{font-family:'JetBrains Mono',monospace;color:var(--dim);font-size:10px}
-
-#fileInput{display:none}
-</style>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/styles.css">
 </head>
 <body>
 
-<header>
-  <div class="logo">C</div>
-  <h1>COSMAX Cosmetic QA Inspector
-    <small><span id="modelLabel">moonshotai/kimi-k3-ultrafast</span> · OpenGateway Vision</small>
-  </h1>
-  <div class="right">
-    <div class="pill" id="statusPill"><span class="dot" style="background:var(--dim)"></span> 대기</div>
-    <div class="pill">목표 <span id="targetTps">4.0</span> TPS</div>
+<!-- ── COMMAND BAR ─────────────────────────────────────────── -->
+<header class="cmdbar" role="banner">
+  <div class="cmdbar-left">
+    <div class="mark" aria-hidden="true"></div>
+    <div class="mark-copy">
+      <div class="mark-title">COSMAX <span class="mark-sub">Line QA Inspector</span></div>
+      <div class="mark-meta" id="modelLabel">moonshotai/kimi-k3-ultrafast · OpenGateway Vision</div>
+    </div>
+  </div>
+
+  <div class="cmdbar-status" role="group" aria-label="런타임 상태">
+    <span class="badge-mode" id="modePill" data-mode="demo">
+      <span class="dot"></span><span id="modeText">DEMO</span>
+    </span>
+    <span class="badge-run" id="statusPill" data-run="idle">
+      <span class="dot"></span><span id="statusText">대기</span>
+    </span>
+    <span class="cmd-metric"><span class="cmd-metric-lbl">배치</span><span class="cmd-metric-val" id="batchLabel">6</span></span>
+    <span class="cmd-metric"><span class="cmd-metric-lbl">해상도</span><span class="cmd-metric-val" id="resLabel">768</span><span class="cmd-metric-suffix">px</span></span>
+    <span class="cmd-metric"><span class="cmd-metric-lbl">처리</span><span class="cmd-metric-val mono" id="cmdProcessed">0</span><span class="cmd-metric-suffix">/&nbsp;<span id="cmdTotal">200</span></span></span>
+  </div>
+
+  <div class="cmdbar-actions">
+    <button class="btn btn-ghost" id="resetBtn" type="button">초기화</button>
+    <button class="btn btn-primary" id="startBtn" type="button">
+      <span class="btn-glyph" aria-hidden="true">▶</span><span>검사 시작</span>
+    </button>
+    <button class="btn btn-danger" id="stopBtn" type="button" hidden>
+      <span class="btn-glyph" aria-hidden="true">■</span><span>정지</span>
+    </button>
   </div>
 </header>
 
-<main>
-  <section class="feed">
-    <div class="feed-head">
-      <h2>라인 검사 피드</h2>
-      <div class="tps-card">
-        <span class="label">실측 TPS</span>
-        <span class="val" id="tpsVal">0.0</span>
-        <span class="unit">img/s</span>
+<div class="err-band" id="startError" role="alert" aria-live="polite" hidden></div>
+
+<!-- ── WORKSPACE (3-COLUMN) ────────────────────────────────── -->
+<main class="workspace" role="main">
+
+  <!-- ─── LEFT · STEP RAIL / SETUP INSPECTOR ─────────────── -->
+  <aside class="rail" aria-label="검사 설정">
+
+    <section class="step" data-step="01">
+      <header class="step-head">
+        <span class="step-num">01</span>
+        <h2 class="step-title">라인</h2>
+      </header>
+      <div class="line-grid" id="lineGrid" role="radiogroup" aria-label="생산 라인">
+        <button class="line-btn is-active" data-line="A" role="radio" aria-checked="true">
+          <span class="line-tag">A</span><span class="line-lbl">립스틱 충전</span>
+        </button>
+        <button class="line-btn" data-line="B" role="radio" aria-checked="false">
+          <span class="line-tag">B</span><span class="line-lbl">파운데이션</span>
+        </button>
+        <button class="line-btn" data-line="C" role="radio" aria-checked="false">
+          <span class="line-tag">C</span><span class="line-lbl">스킨케어</span>
+        </button>
+        <button class="line-btn" data-line="D" role="radio" aria-checked="false">
+          <span class="line-tag">D</span><span class="line-lbl">포장·검수</span>
+        </button>
       </div>
-      
-      <div class="model-select-wrap">
-        모델
-        <select class="model-select" id="modelSelect">
-          <option value="moonshotai/kimi-k3-ultrafast">Kimi K3 Ultrafast</option>
-          <option value="z-ai/glm-5.3-flash">GLM 5.3 Flash</option>
-          <option value="sionic-ai/glm-5.3-flash-ultrafast">GLM 5.3 Flash Ultrafast</option>
+    </section>
+
+    <section class="step" data-step="02">
+      <header class="step-head">
+        <span class="step-num">02</span>
+        <h2 class="step-title">모델 · 프롬프트</h2>
+      </header>
+      <label class="lbl" for="modelSelect">비전 모델</label>
+      <select id="modelSelect" class="input">
+        <option value="moonshotai/kimi-k3-ultrafast">Kimi K3 Ultrafast</option>
+        <option value="z-ai/glm-5.3-flash">GLM 5.3 Flash</option>
+        <option value="sionic-ai/glm-5.3-flash-ultrafast" disabled>GLM 5.3 Flash Ultrafast · 준비 중</option>
+      </select>
+
+      <div class="seg" role="tablist" aria-label="검사 모드">
+        <button class="seg-btn is-active" data-mode="zero_shot" role="tab" aria-selected="true">Zero-shot</button>
+        <button class="seg-btn" data-mode="few_shot" role="tab" aria-selected="false">Few-shot</button>
+      </div>
+
+      <label class="lbl" for="criteria">판정 기준</label>
+      <textarea id="criteria" class="input mono-sm" rows="3" aria-describedby="criteriaHelp"></textarea>
+      <div class="hint" id="criteriaHelp">세미콜론(;) 으로 결함 항목을 구분합니다.</div>
+
+      <div id="fewShotBox" class="few-shot" hidden>
+        <div class="fs-slot" data-slot="OK">
+          <div class="fs-head">
+            <span class="fs-lbl">OK 참조</span>
+            <span class="fs-req" data-req="OK">필수</span>
+          </div>
+          <div class="fs-preview" id="fsOKPreview">
+            <span class="hint">이미지 없음</span>
+          </div>
+          <div class="fs-actions">
+            <button class="btn btn-mini" id="fsOKGen" type="button">데모 생성</button>
+            <label class="btn btn-mini">
+              업로드<input type="file" id="fsOKFile" accept="image/*" hidden>
+            </label>
+          </div>
+        </div>
+        <div class="fs-slot" data-slot="DEFECT">
+          <div class="fs-head">
+            <span class="fs-lbl">DEFECT 참조</span>
+            <span class="fs-req" data-req="DEFECT">필수</span>
+          </div>
+          <div class="fs-preview" id="fsBadPreview">
+            <span class="hint">이미지 없음</span>
+          </div>
+          <div class="fs-actions">
+            <button class="btn btn-mini" id="fsBadGen" type="button">데모 생성</button>
+            <label class="btn btn-mini">
+              업로드<input type="file" id="fsBadFile" accept="image/*" hidden>
+            </label>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="step" data-step="03">
+      <header class="step-head">
+        <span class="step-num">03</span>
+        <h2 class="step-title">소스 미디어</h2>
+      </header>
+      <div class="src-tabs" role="tablist" aria-label="검사 소스">
+        <button class="src-tab is-active" data-src="sample-images" role="tab" aria-selected="true">샘플 이미지</button>
+        <button class="src-tab" data-src="sample-video" role="tab" aria-selected="false">샘플 영상</button>
+        <button class="src-tab" data-src="upload-images" role="tab" aria-selected="false">이미지 업로드</button>
+        <button class="src-tab" data-src="upload-video" role="tab" aria-selected="false">영상 업로드</button>
+      </div>
+
+      <div class="src-panel" data-src-panel="sample-images">
+        <label class="lbl" for="sampleScenario">시나리오</label>
+        <select id="sampleScenario" class="input">
+          <option value="synthetic-200">200-unit 합성 라인</option>
+          <option value="line-mixed-24">24-unit 혼합</option>
+          <option value="line-defects-12">12-unit 불량 위주</option>
         </select>
+        <div class="src-meta" id="sampleImagesMeta">—</div>
+        <div class="thumb-grid" id="sampleThumbs" aria-label="샘플 이미지 썸네일" hidden></div>
       </div>
-      <div class="speed-control">
-        속도
-        <input type="range" id="speedSlider" min="1" max="8" step="0.5" value="4">
-        <span id="speedLabel">4/s</span>
-      </div>
-      <div class="spacer"></div>
-      <div class="controls">
-        <button class="btn" onclick="document.getElementById('fileInput').click()">이미지 업로드</button>
-        <input type="file" id="fileInput" accept="image/*" multiple>
-        <button class="btn" id="demoBtn">데모 이미지</button>
-        <button class="btn primary" id="startBtn">▶ 시작</button>
-        <button class="btn danger" id="stopBtn" style="display:none">■ 정지</button>
-      </div>
-    </div>
 
-    <div class="spotlight" id="spotlight">
-      <div class="sl-badge wait">대기 중</div>
-      <div class="sl-text">
-        <div class="sl-title">검사를 시작하면 최신 결과가 여기에 표시됩니다</div>
-        <div class="sl-sub">—</div>
+      <div class="src-panel" data-src-panel="sample-video" hidden>
+        <label class="lbl" for="sampleVideoScenario">절차 시나리오</label>
+        <select id="sampleVideoScenario" class="input">
+          <option value="conveyor-stable">안정 컨베이어 · 6초</option>
+          <option value="conveyor-events">간헐 패키징 이벤트 · 10초</option>
+        </select>
+        <div class="src-meta" id="sampleVideoMeta">—</div>
       </div>
-    </div>
 
-    <div class="grid-scroll">
-      <div class="grid" id="grid"></div>
-    </div>
-  </section>
-
-  <aside class="stats">
-    <div class="stats-section">
-      <h3>누적 통계</h3>
-      <div class="big-stats">
-        <div class="stat-box"><div class="num" id="totalCnt">0</div><div class="lbl">총 검사</div></div>
-        <div class="stat-box rate"><div class="num" id="avgTps">0.0</div><div class="lbl">평균 TPS</div></div>
-        <div class="stat-box ok"><div class="num" id="okCnt">0</div><div class="lbl">정상</div></div>
-        <div class="stat-box bad"><div class="num" id="badCnt">0</div><div class="lbl">불량</div></div>
-      </div>
-      <div class="defect-rate-bar">
-        <div class="drl-label">
-          <span class="ok">정상 <span id="okPct">0%</span></span>
-          <span class="bad">불량 <span id="badPct">0%</span></span>
-        </div>
-        <div class="bar-track">
-          <div class="bar-fill-ok" id="barOk" style="width:50%"></div>
-          <div class="bar-fill-bad" id="barBad" style="width:50%"></div>
+      <div class="src-panel" data-src-panel="upload-images" hidden>
+        <label class="btn btn-block">
+          이미지 파일 선택 (여러 개)
+          <input type="file" id="uploadImagesInput" accept="image/png,image/jpeg,image/jpg,image/webp" multiple hidden>
+        </label>
+        <div class="src-meta" id="uploadImagesMeta">파일이 선택되지 않았습니다.</div>
+        <div class="thumb-grid" id="uploadThumbs" aria-label="업로드 이미지 썸네일" hidden></div>
+        <div class="src-actions" hidden id="uploadImagesActions">
+          <button class="btn btn-mini" id="uploadImagesSelectAll" type="button">전체 선택</button>
+          <button class="btn btn-mini" id="uploadImagesSelectNone" type="button">전체 해제</button>
+          <button class="btn btn-mini" id="uploadImagesClear" type="button">비우기</button>
         </div>
       </div>
-      <div class="spark-wrap">
-        <div class="lbl">TPS 추이 (최근 60초)</div>
-        <canvas id="spark"></canvas>
+
+      <div class="src-panel" data-src-panel="upload-video" hidden>
+        <label class="btn btn-block">
+          영상 파일 선택 (mp4/webm/mov)
+          <input type="file" id="uploadVideoInput" accept="video/*" hidden>
+        </label>
+        <div class="src-meta" id="uploadVideoMeta">파일이 선택되지 않았습니다.</div>
+        <div class="src-actions" hidden id="uploadVideoActions">
+          <button class="btn btn-mini" id="uploadVideoClear" type="button">비우기</button>
+        </div>
+        <div class="hint">영상은 브라우저에서만 디코딩되며 서버로 업로드되지 않습니다.</div>
       </div>
-    </div>
-    <div class="stats-section" style="flex:1">
-      <h3>최근 판정</h3>
-      <div class="recent-list" id="recentList"></div>
+
+      <div class="src-video-rate" id="videoRateWrap" hidden>
+        <label class="lbl" for="snapshotFps">
+          스냅샷 속도
+          <span class="lbl-val" id="snapshotFpsLabel">2 FPS</span>
+        </label>
+        <input id="snapshotFps" type="range" min="1" max="8" step="1" value="2" class="range">
+        <div class="hint" id="snapshotEstimate">예상 프레임: —</div>
+      </div>
+    </section>
+
+    <section class="step" data-step="04">
+      <header class="step-head">
+        <span class="step-num">04</span>
+        <h2 class="step-title">캡처</h2>
+      </header>
+      <div class="dual">
+        <div>
+          <label class="lbl" for="batchSize">배치 크기<span class="lbl-suffix">4-8</span></label>
+          <input id="batchSize" type="number" min="4" max="8" step="1" value="6" class="input mono">
+        </div>
+        <div>
+          <label class="lbl" for="resolution">해상도</label>
+          <select id="resolution" class="input">
+            <option value="512">512</option>
+            <option value="768" selected>768</option>
+            <option value="1024">1024</option>
+          </select>
+        </div>
+      </div>
+      <label class="lbl" for="threshold">신뢰도 임계값<span class="lbl-val" id="thresholdLabel">0.55</span></label>
+      <input id="threshold" type="range" min="0" max="1" step="0.05" value="0.55" class="range">
+      <label class="lbl" for="totalUnits" id="totalUnitsLbl">총 검사 수량<span class="lbl-suffix">합성-200 전용</span></label>
+      <input id="totalUnits" type="number" min="1" max="200" step="1" value="200" class="input mono">
+      <label class="check">
+        <input type="checkbox" id="eventGate">
+        <span>ROI 내부 변화 시에만 검사 (이벤트 게이팅)</span>
+      </label>
+      <label class="lbl" for="eventThreshold">변화 임계값<span class="lbl-val" id="eventThresholdLabel">3%</span></label>
+      <input id="eventThreshold" type="range" min="0.005" max="0.2" step="0.005" value="0.03" class="range">
+    </section>
+
+    <div class="rail-footnote">
+      배치 UI 4-8 · 마지막 그룹은 1-3 이 될 수 있음 (전송 캡 8).
     </div>
   </aside>
+
+  <!-- ─── CENTER · MEDIA STAGE ───────────────────────────── -->
+  <section class="stage" aria-label="검사 스테이지">
+
+    <div class="stage-head">
+      <div class="stage-crumbs">
+        <span class="crumb-lbl">Serial</span>
+        <span class="crumb-val mono" id="serialLabel">—</span>
+        <span class="crumb-sep">/</span>
+        <span class="crumb-lbl">ROI</span>
+        <span class="crumb-val" id="roiInfo">전체 프레임</span>
+      </div>
+      <div class="stage-tools">
+        <button class="tool" id="previewPrev" type="button" aria-label="이전 미리보기">◂</button>
+        <span class="mono tool-counter" id="previewCounter">—</span>
+        <button class="tool" id="previewNext" type="button" aria-label="다음 미리보기">▸</button>
+        <span class="tool-sep" aria-hidden="true"></span>
+        <button class="tool tool-lbl" id="roiReset" type="button">전체로</button>
+        <button class="tool tool-lbl" id="roiNew" type="button">새 샘플</button>
+      </div>
+    </div>
+
+    <div class="canvas-shell">
+      <canvas id="roiCanvas" width="960" height="640" tabindex="0" aria-label="ROI 편집 캔버스"></canvas>
+      <div class="canvas-overlay">
+        <div class="canvas-hint" id="roiHint">캔버스 위에서 드래그하여 검사 영역을 지정하세요</div>
+      </div>
+      <div class="canvas-extract" id="extractProgress" hidden>
+        <div class="extract-copy" id="extractLabel">프레임 추출 중…</div>
+        <div class="progress-track"><div id="extractFill"></div></div>
+      </div>
+    </div>
+
+    <div class="stage-run">
+      <div class="run-track">
+        <div id="progressFill"></div>
+      </div>
+      <div class="run-inline">
+        <span class="run-inline-lbl">진행</span>
+        <span class="mono" id="doneCount">0</span>
+        <span class="run-inline-sep">/</span>
+        <span class="mono" id="totalCount">200</span>
+        <span class="run-inline-sep">·</span>
+        <span class="run-inline-lbl">불량률</span>
+        <span class="mono" id="rateLabel">0%</span>
+        <span class="run-inline-sep">·</span>
+        <span class="run-inline-lbl">지연</span>
+        <span class="mono" id="latLabel">0</span><span class="run-inline-lbl">ms</span>
+      </div>
+    </div>
+
+    <div class="filmstrip" id="grid" aria-label="최근 배치 결과"></div>
+    <div class="filmstrip-empty" id="gridEmpty">
+      <div class="empty-title">아직 결과가 없습니다</div>
+      <div class="empty-sub">▶ 검사 시작을 눌러 최근 배치 결과가 이곳 필름스트립에 채워집니다.</div>
+    </div>
+
+  </section>
+
+  <!-- ─── RIGHT · VERDICT / METRICS ──────────────────────── -->
+  <aside class="verdict" aria-label="판정 결과">
+
+    <div class="verdict-card">
+      <div class="verdict-head">
+        <span class="v-lbl">최신 판정</span>
+        <span class="v-mode" id="spotMode">DEMO</span>
+      </div>
+      <div class="spot-shell">
+        <canvas id="spotCanvas" width="360" height="360" aria-label="최신 검사 결과 이미지"></canvas>
+        <div class="spot-empty" id="spotEmpty">최신 결과가 여기에 표시됩니다</div>
+      </div>
+      <div class="spot-verdict">
+        <span class="v-badge v-badge-wait" id="spotBadge">대기</span>
+        <div class="v-title" id="spotTitle">—</div>
+        <div class="v-sub mono" id="spotSub">—</div>
+        <div class="v-reason" id="spotReason"></div>
+      </div>
+    </div>
+
+    <div class="metric-grid">
+      <div class="metric"><div class="metric-v" id="okCount">0</div><div class="metric-l">정상</div></div>
+      <div class="metric metric-bad"><div class="metric-v" id="badCount">0</div><div class="metric-l">불량</div></div>
+      <div class="metric"><div class="metric-v" id="skipCount">0</div><div class="metric-l">스킵</div></div>
+      <div class="metric metric-warn"><div class="metric-v" id="reviewCount">0</div><div class="metric-l">리뷰</div></div>
+      <div class="metric"><div class="metric-v mono" id="tpsLabel">0.0</div><div class="metric-l">img/s (데모)</div></div>
+      <div class="metric"><div class="metric-v mono" id="errCount">0</div><div class="metric-l">오류</div></div>
+    </div>
+
+    <div class="verdict-card verdict-recent">
+      <div class="verdict-head">
+        <span class="v-lbl">최근 판정</span>
+        <span class="v-mode" id="recentCount">0</span>
+      </div>
+      <div class="recent-list" id="recentList">
+        <div class="hint">아직 없음</div>
+      </div>
+    </div>
+
+    <div class="verdict-footnote">
+      데모 처리량은 시각적 데모용 지표이며 프로덕션 라인의 FPS/TPS 벤치마크가 아닙니다.
+    </div>
+  </aside>
+
 </main>
 
-<script src="app.js"></script>
+<script type="module" src="/app.js"></script>
 </body>
 </html>
