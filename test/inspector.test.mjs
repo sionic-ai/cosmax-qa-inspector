@@ -15,6 +15,13 @@ import {
   eventGateDecision,
   buildSnapshotTimes,
   countSelectedItems,
+  buildReferenceFocusPlan,
+  waitForVideoMetadata,
+  createGenerationGate,
+  detectRasterDimensions,
+  computeBoundedImageDimensions,
+  buildInspectionSettingsSnapshot,
+  beginBoundedFileGeneration,
   DEFAULT_CRITERIA,
   MAX_EXTRACTED_FRAMES,
   MIN_SNAPSHOT_FPS,
@@ -166,6 +173,90 @@ test("buildPromptMessages few-shot includes OK and DEFECT reference labels", () 
   assert.equal(imgs.length, 3);
 });
 
+test("validateBatchRequest accepts a normalized focus ROI on few-shot references", () => {
+  const out = validateBatchRequest({
+    images: ["data:image/png;base64,AA"],
+    settings: {
+      line: "L", model: "m", mode: "few_shot", resolution: 512, threshold: 0.5, criteria: "scratch",
+      references: [
+        { label: "OK", image: "data:image/png;base64,OK", focus_roi: [0.1, 0.2, 0.5, 0.4] },
+        { label: "DEFECT", image: "data:image/png;base64,BAD", focus_roi: [0.1, 0.2, 0.5, 0.4] },
+      ],
+    },
+  });
+  assert.equal(out.ok, true);
+});
+
+test("validateBatchRequest rejects an invalid few-shot focus ROI", () => {
+  const out = validateBatchRequest({
+    images: ["data:image/png;base64,AA"],
+    settings: {
+      line: "L", model: "m", mode: "few_shot", resolution: 512, threshold: 0.5, criteria: "scratch",
+      references: [
+        { label: "OK", image: "data:image/png;base64,OK", focus_roi: [0.8, 0.2, 0.5, 0.4] },
+        { label: "DEFECT", image: "data:image/png;base64,BAD" },
+      ],
+    },
+  });
+  assert.equal(out.ok, false);
+  assert.match(out.error, /focus_roi/i);
+});
+
+test("buildPromptMessages explains user-selected reference ROI composites", () => {
+  const msgs = buildPromptMessages({
+    images: ["data:image/png;base64,TARGET"],
+    settings: {
+      mode: "few_shot", criteria: "seal damage", line: "Line-C", threshold: 0.5,
+      references: [
+        { label: "OK", image: "data:image/png;base64,OK", focus_roi: [0.1, 0.2, 0.5, 0.4] },
+        { label: "DEFECT", image: "data:image/png;base64,BAD", focus_roi: [0.1, 0.2, 0.5, 0.4] },
+      ],
+    },
+  });
+  const text = msgs[0].content.find(c => c.type === "text").text;
+  assert.match(text, /user-selected focus region/i);
+  assert.match(text, /full context.*magnified crop/i);
+});
+
+test("reference focus is soft visual guidance, not a coordinate hard rule", () => {
+  const msgs = buildPromptMessages({
+    images: ["data:image/png;base64,TARGET"],
+    settings: {
+      mode: "few_shot", criteria: "label print and cap alignment", line: "Line-A", threshold: 0.55,
+      references: [
+        { label: "OK", image: "data:image/png;base64,OK", focus_roi: [0.2, 0.2, 0.4, 0.3] },
+        { label: "DEFECT", image: "data:image/png;base64,BAD", focus_roi: [0.3, 0.1, 0.3, 0.4] },
+      ],
+    },
+  });
+  const text = msgs[0].content.find(c => c.type === "text").text;
+  assert.match(text, /visual guidance.*not.*hard rule/i);
+  assert.match(text, /ignore unrelated background/i);
+  assert.match(text, /position|alignment/i);
+});
+
+test("buildReferenceFocusPlan keeps full context and adds crop padding", () => {
+  const plan = buildReferenceFocusPlan([0.25, 0.2, 0.5, 0.4], 1000, 500);
+  assert.equal(plan.width, 1024);
+  assert.equal(plan.height, 512);
+  // Floor/ceil pixel bounds conservatively include every selected edge pixel.
+  assert.deepEqual(plan.cropSource, { x: 190, y: 76, w: 620, h: 249 });
+  assert.ok(plan.contextDest.w > 0 && plan.contextDest.h > 0);
+  assert.ok(plan.cropDest.w > 0 && plan.cropDest.h > 0);
+  assert.ok(plan.contextDest.x < 512);
+  assert.ok(plan.cropDest.x >= 512);
+});
+
+test("buildReferenceFocusPlan rejects a missing or degenerate ROI", () => {
+  assert.throws(() => buildReferenceFocusPlan([0.1, 0.1, 0, 0.5], 100, 100));
+  assert.throws(() => buildReferenceFocusPlan([0.9, 0.1, 0.2, 0.5], 100, 100));
+});
+
+test("buildReferenceFocusPlan tolerates floating-point ROIs that touch an edge", () => {
+  const plan = buildReferenceFocusPlan([0, 0, 1.0000000000000002, 1], 1179, 2556);
+  assert.deepEqual(plan.cropSource, { x: 0, y: 0, w: 1179, h: 2556 });
+});
+
 // ─── normalizeModelOutput ──────────────────────────────────────────
 test("normalizeModelOutput strips markdown fences and parses JSON", () => {
   const raw = "```json\n{\"defect\":true,\"type\":\"scratch\",\"confidence\":0.82,\"items\":[]}\n```";
@@ -292,6 +383,13 @@ test("roiToPixels clamps a rect that overflows the canvas", () => {
   assert.equal(px.y + px.h <= 100, true);
 });
 
+test("roiToPixels preserves a positive pixel for tiny valid edge ROIs", () => {
+  assert.deepEqual(
+    roiToPixels({ x: 0.999, y: 0.999, w: 0.001, h: 0.001 }, 2, 2),
+    { x: 1, y: 1, w: 1, h: 1 },
+  );
+});
+
 // ─── eventGateDecision ─────────────────────────────────────────────
 test("eventGateDecision returns skip when change ratio below threshold", () => {
   const d = eventGateDecision({ changedPixels: 100, totalPixels: 10000, threshold: 0.05 });
@@ -396,6 +494,81 @@ test("buildSnapshotTimes final timestamp never exceeds duration", () => {
 test("buildSnapshotTimes exports snapshot-fps bounds", () => {
   assert.equal(MIN_SNAPSHOT_FPS, 1);
   assert.equal(MAX_SNAPSHOT_FPS, 8);
+});
+
+test("waitForVideoMetadata rejects instead of hanging when metadata never arrives", async () => {
+  class PendingVideo extends EventTarget {
+    load() {}
+  }
+  await assert.rejects(
+    waitForVideoMetadata(new PendingVideo(), 5),
+    /metadata.*timeout/i,
+  );
+});
+
+test("waitForVideoMetadata catches a metadata event emitted during load", async () => {
+  class ReadyVideo extends EventTarget {
+    load() { this.dispatchEvent(new Event("loadedmetadata")); }
+  }
+  const video = new ReadyVideo();
+  assert.equal(await waitForVideoMetadata(video, 50), video);
+});
+
+test("createGenerationGate invalidates stale asynchronous work", () => {
+  const gate = createGenerationGate();
+  const first = gate.issue();
+  const second = gate.issue();
+  assert.equal(gate.isCurrent(first), false);
+  assert.equal(gate.isCurrent(second), true);
+  gate.invalidate();
+  assert.equal(gate.isCurrent(second), false);
+});
+
+test("an oversized newer file selection invalidates an older pending generation", () => {
+  const gate = createGenerationGate();
+  const first = beginBoundedFileGeneration(gate, 1024, 12 * 1024 * 1024);
+  const oversized = beginBoundedFileGeneration(gate, 13 * 1024 * 1024, 12 * 1024 * 1024);
+  assert.equal(first.accepted, true);
+  assert.equal(oversized.accepted, false);
+  assert.equal(gate.isCurrent(first.generation), false);
+  assert.equal(gate.isCurrent(oversized.generation), true);
+});
+
+test("detectRasterDimensions reads PNG and JPEG headers without decoding pixels", () => {
+  const png = new Uint8Array(24);
+  png.set([137, 80, 78, 71, 13, 10, 26, 10], 0);
+  png.set([73, 72, 68, 82], 12);
+  new DataView(png.buffer).setUint32(16, 4000);
+  new DataView(png.buffer).setUint32(20, 3000);
+  assert.deepEqual(detectRasterDimensions(png), { width: 4000, height: 3000, format: "png" });
+
+  const jpeg = new Uint8Array([
+    0xff, 0xd8,
+    0xff, 0xe0, 0x00, 0x04, 0x00, 0x00,
+    0xff, 0xc0, 0x00, 0x07, 0x08, 0x0b, 0xb8, 0x0f, 0xa0,
+  ]);
+  assert.deepEqual(detectRasterDimensions(jpeg), { width: 4000, height: 3000, format: "jpeg" });
+});
+
+test("computeBoundedImageDimensions rejects decode bombs and bounds the long edge", () => {
+  assert.deepEqual(computeBoundedImageDimensions(4000, 3000, 1536), { width: 1536, height: 1152 });
+  assert.throws(() => computeBoundedImageDimensions(9000, 2000, 1536), /dimensions exceed/i);
+  assert.throws(() => computeBoundedImageDimensions(5000, 4000, 1536), /pixel count exceeds/i);
+});
+
+test("buildInspectionSettingsSnapshot keeps one immutable reference set for a run", () => {
+  const references = { OK: "data:image/jpeg;base64,ok", DEFECT: "data:image/jpeg;base64,bad" };
+  const referenceRois = { OK: [0.1, 0.2, 0.3, 0.4], DEFECT: null };
+  const snapshot = buildInspectionSettingsSnapshot({
+    line: "Line-A", model: "model", mode: "few_shot", resolution: 768,
+    threshold: 0.55, criteria: "criteria", references, referenceRois,
+  });
+  references.OK = "replacement";
+  referenceRois.OK[0] = 0.9;
+  assert.equal(snapshot.references[0].image, "data:image/jpeg;base64,ok");
+  assert.deepEqual(snapshot.references[0].focus_roi, [0.1, 0.2, 0.3, 0.4]);
+  assert.equal(Object.isFrozen(snapshot), true);
+  assert.equal(Object.isFrozen(snapshot.references), true);
 });
 
 // ─── countSelectedItems ────────────────────────────────────────────

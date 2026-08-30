@@ -414,9 +414,34 @@ select.input {
   margin-bottom: 6px;
 }
 .fs-preview img { width: 100%; height: 100%; object-fit: cover; }
-.fs-actions { display: flex; gap: 4px; }
-.fs-actions .btn { flex: 1; }
+.fs-slot.has-focus .fs-preview img { object-fit: contain; }
+.fs-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.fs-actions .btn { min-width: 0; }
 .fs-actions label.btn { display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.fs-help { grid-column: 1 / -1; color: var(--ink-60); font-size: 10px; line-height: 1.45; }
+.fs-slot.has-focus { border-color: rgba(20,184,166,.55); }
+
+/* ── FEW-SHOT ROI DIALOG ─────────────────────────────────── */
+.ref-roi-modal {
+  position: fixed; inset: 0; z-index: 100;
+  display: grid; place-items: center;
+  padding: 24px; background: rgba(3,5,8,.78); backdrop-filter: blur(8px);
+}
+.ref-roi-modal[hidden] { display: none; }
+.ref-roi-dialog {
+  width: min(1040px, 94vw); max-height: 94vh; overflow: auto;
+  background: var(--shell-1); border: 1px solid var(--line-hi);
+  border-radius: var(--r-lg); box-shadow: 0 28px 80px rgba(0,0,0,.5);
+  padding: 16px;
+}
+.ref-roi-head, .ref-roi-foot { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.ref-roi-head { margin-bottom: 12px; }
+.ref-roi-head h2 { margin: 3px 0 0; font-size: 16px; }
+.ref-roi-canvas-shell { position: relative; border: 1px solid var(--line); border-radius: var(--r-sm); overflow: hidden; background: #080b10; }
+#refRoiCanvas { display: block; width: min(100%, 99.2vh); height: auto; aspect-ratio: 8 / 5; margin: 0 auto; cursor: crosshair; touch-action: none; }
+.ref-roi-canvas-shell .canvas-hint { pointer-events: none; }
+.ref-roi-foot { margin-top: 12px; }
+.ref-roi-actions { display: flex; gap: 6px; }
 
 /* ── SOURCE TABS ──────────────────────────────────────────── */
 .src-tabs {
