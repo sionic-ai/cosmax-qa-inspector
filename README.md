@@ -35,8 +35,37 @@ npm start
 Node 20+ required. No dependencies to install.
 
 ```bash
-npm test    # node:test suite (91 tests)
+npm test    # node:test suite (94 tests)
 npm run check   # syntax check for server + browser modules
+```
+
+### Docker / deployment
+
+The deploy image follows the internal web-service convention used by Mission
+Control and other demo charts: **container port 3000** and a dependency-free
+`GET /_health` probe. The image build runs syntax checks and the complete test
+suite, then copies only runtime files into a non-root Alpine image.
+
+```bash
+docker build -t cosmax-qa-inspector:local .
+docker run --rm -p 3000:3000 cosmax-qa-inspector:local
+curl -fsS http://127.0.0.1:3000/_health  # ok
+```
+
+`OPENGATEWAY_API_KEY` may be injected at runtime for LIVE mode. The image sets
+`HOST=0.0.0.0`, `PORT=3000`, and `TRUST_PROXY_HOSTS=1`; the last setting is for
+deployment behind the company ingress and keeps unsafe browser requests
+same-origin. Local non-container runs retain strict loopback Host validation.
+
+Shared-chart probe values:
+
+```yaml
+service:
+  httpPort: 3000
+livenessProbe:
+  httpGet: { path: /_health, port: http }
+readinessProbe:
+  httpGet: { path: /_health, port: http }
 ```
 
 ---

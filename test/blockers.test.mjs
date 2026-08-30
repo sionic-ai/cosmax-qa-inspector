@@ -212,6 +212,19 @@ test("isAllowedHost rejects wrong port or non-loopback hostname", () => {
   assert.equal(isAllowedHost("",                     { bindHost: "127.0.0.1", port: 5173 }), false);
 });
 
+test("isAllowedHost accepts ingress and pod hosts only in trusted-proxy mode", () => {
+  const opts = { bindHost: "0.0.0.0", port: 3000, trustProxyHosts: true };
+  assert.equal(isAllowedHost("cosmax-demo.sionic.tech", opts), true);
+  assert.equal(isAllowedHost("10.42.3.9:3000", opts), true);
+  assert.equal(isAllowedHost("bad host", opts), false);
+});
+
+test("isSafeOriginForHost supports HTTPS ingress while preserving same-origin", () => {
+  const opts = { bindHost: "0.0.0.0", port: 3000, trustProxyHosts: true };
+  assert.equal(isSafeOriginForHost("https://cosmax-demo.sionic.tech", "cosmax-demo.sionic.tech", opts), true);
+  assert.equal(isSafeOriginForHost("https://evil.example", "cosmax-demo.sionic.tech", opts), false);
+});
+
 test("isSafeOriginForHost passes when Origin is absent (non-CORS)", () => {
   assert.equal(isSafeOriginForHost(undefined, "127.0.0.1:5173", { bindHost: "127.0.0.1", port: 5173 }), true);
 });
@@ -250,6 +263,16 @@ test("server rejects requests with a mismatched Host header", async () => {
     const r = await req({ port, method: "GET", path: "/api/config", headers: { Host: "evil.example:80" } });
     assert.equal(r.status, 400);
     assert.match(r.body, /host/i);
+  });
+});
+
+test("GET /_health returns dependency-free probe response", async () => {
+  await withServer(async (port) => {
+    const r = await req({ port, path: "/_health", headers: { Host: `127.0.0.1:${port}` } });
+    assert.equal(r.status, 200);
+    assert.equal(r.body, "ok");
+    assert.match(String(r.headers["content-type"]), /^text\/plain/);
+    assert.equal(r.headers["cache-control"], "no-store");
   });
 });
 

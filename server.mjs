@@ -80,7 +80,14 @@ function parseHostHeader(hostHeader) {
   return { hostname: m[1].replace(/^\[|\]$/g, "").toLowerCase(), port: Number(m[2]) };
 }
 
-export function isAllowedHost(hostHeader, { bindHost, port } = {}) {
+export function isAllowedHost(hostHeader, opts = {}) {
+  const { bindHost, port, trustProxyHosts = false } = opts;
+  if (trustProxyHosts) {
+    const value = String(hostHeader || "").toLowerCase();
+    if (!/^(?:[a-z0-9.-]+|\[[0-9a-f:]+\])(?::\d{1,5})?$/.test(value)) return false;
+    const portMatch = value.match(/:(\d{1,5})$/);
+    return !portMatch || Number(portMatch[1]) <= 65535;
+  }
   const bh = String(bindHost ?? HOST).toLowerCase();
   const pn = Number(port ?? PORT);
   const p = parseHostHeader(hostHeader);
@@ -94,6 +101,11 @@ export function isSafeOriginForHost(originHeader, hostHeader, opts) {
   if (!originHeader) return true; // no Origin ⇒ not a browser CORS request
   try {
     const u = new URL(originHeader);
+    if (opts?.trustProxyHosts === true) {
+      return (u.protocol === "http:" || u.protocol === "https:") &&
+        u.host.toLowerCase() === String(hostHeader || "").toLowerCase() &&
+        isAllowedHost(hostHeader, opts);
+    }
     if (u.protocol !== "http:") return false;
     if (!isAllowedHost(u.host, opts)) return false;
     if (!isAllowedHost(hostHeader, opts)) return false;
@@ -418,6 +430,15 @@ function jsonResponse(res, status, obj) {
   res.end(JSON.stringify(obj));
 }
 
+function textResponse(res, status, text) {
+  if (res.writableEnded) return;
+  res.writeHead(status, {
+    "Content-Type": "text/plain; charset=utf-8",
+    "Cache-Control": "no-store",
+  });
+  res.end(text);
+}
+
 function applyCors(req, res) {
   const originHeader = req.headers.origin;
   const hostHeader = req.headers.host;
@@ -459,6 +480,7 @@ export function createServer() {
       const bindOpts = {
         bindHost: req.socket?.localAddress || HOST,
         port: req.socket?.localPort || PORT,
+        trustProxyHosts: process.env.TRUST_PROXY_HOSTS === "1",
       };
 
       // 1. Host allow-list (before any routing)
@@ -467,6 +489,12 @@ export function createServer() {
       }
 
       const url = new URL(req.url, `http://${req.headers.host}`);
+
+      // Dependency-free process probe used by the shared service chart.
+      if (url.pathname === "/_health" && req.method === "GET") {
+        return textResponse(res, 200, "ok");
+      }
+
       applyCors(req, res);
       if (req.method === "OPTIONS") { res.writeHead(204).end(); return; }
 
